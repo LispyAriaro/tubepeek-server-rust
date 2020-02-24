@@ -146,11 +146,15 @@ fn handle_social_identity(json : &str, connection: &PgConnection, ws_client: &Se
                     .expect("Error loading user social identity");
 
                 if(existing_social_identity.len() > 0) {
-                    
-                    return "all good".to_owned();
+                    diesel::update(social_identities.filter(tubepeek_server_rust::schema::social_identities::dsl::id.eq(existing_social_identity[0].id)))
+                        .set((
+                            tubepeek_server_rust::schema::social_identities::dsl::full_name.eq(&social_identity.authData.fullName),
+                            tubepeek_server_rust::schema::social_identities::dsl::image_url.eq(&social_identity.authData.imageUrl),
+                            tubepeek_server_rust::schema::social_identities::dsl::updated_at.eq(&now))
+                        )
+                        .execute(connection);
                 } else {
                     save_social_identity(existing_user_results[0].id, auth_data_email, social_identity.provider, &social_identity.authData, &now);
-                    return "all good".to_owned();
                 }
             } else {
                 let new_user = NewUser {
