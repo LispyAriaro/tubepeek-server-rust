@@ -3,6 +3,7 @@ extern crate ws;
 #[macro_use]
 extern crate lazy_static;
 
+extern crate reqwest;
 extern crate tubepeek_server_rust;
 
 mod db_connection;
@@ -10,6 +11,7 @@ use db_connection::{PgPool, establish_connection};
 
 mod ws_dto;
 use ws_dto::*;
+use serde::{Deserialize, Serialize};
 
 use ws::{listen, Handler, Sender, Message, CloseCode};
 use ws::Result as WsResult;
@@ -25,6 +27,7 @@ use tubepeek_server_rust::models::{Usermaster, NewUser, NewSocialIdentity, Socia
 use chrono::{Utc, NaiveDateTime};
 use std::ptr::null;
 // use serde_json::Result as JsResult;
+
 
 
 //use tubepeek_server_rust::schema::{usermaster};
@@ -86,7 +89,7 @@ impl Handler for WsServer {
             "TakeMySocialIdentity" => handle_social_identity(json, &database_connection, &self.out),
             "UserChangedOnlineStatus" => handle_user_online_status_change(json, &database_connection),
             "AddThisPersonToMyFriendsList" => handle_frend_addition(json, &database_connection),
-            "ChangedVideo" => handle_vidoe_change(json, &database_connection),
+            "ChangedVideo" => handle_vidoe_change(json, &database_connection, &self.out),
             _ => "Unknown message type. ".to_owned(),
         };
 
@@ -200,9 +203,40 @@ fn handle_frend_addition(json : &str, connection: &PgConnection) -> String {
     "All good".to_owned()
 }
 
-fn handle_vidoe_change(json : &str, connection: &PgConnection) -> String {
+fn handle_vidoe_change(json : &str, connection: &PgConnection, ws_client: &Sender) -> String {
     println!("Got ChangedVideo message.");
+    let video_change_maybe: Result<VideoChangeMessage, Error> = serde_json::from_str(json);
 
+    use tubepeek_server_rust::schema::usermaster::dsl::*;
+    use tubepeek_server_rust::schema::social_identities::dsl::*;
+
+    match video_change_maybe {
+        Ok(video_change) => {
+            let video_url = video_change.videoUrl.as_str();
+            let google_user_id = video_change.googleUserId.as_str();
+            let youtube_query_url = format!("http://www.youtube.com{}{}", "/oembed?format=json&url=", video_url);
+
+            println!("youtube_query_url: {}", youtube_query_url);
+
+            let youtube_response_maybe = reqwest::blocking::get(youtube_query_url.as_str());
+            match youtube_response_maybe {
+                Ok(valid_response) => {
+                    // let mut buf = String::new();
+                    // valid_response. .read_to_string(&mut buf).expect("Failed to read response");
+
+                    let jsonified = valid_response.json::<YoutubeVideoResponse>();
+
+                    println!("eqweewewe {:#?}", jsonified);
+                },
+                Err(err_msg) => {
+                    println!("Invalid video change.");
+                }
+            }
+        },
+        Err(err_msg) => {
+            println!("Invalid video change.");
+        }
+    };
     "All good".to_owned()
 }
 

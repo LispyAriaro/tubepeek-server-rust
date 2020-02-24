@@ -39,3 +39,9 @@ pub struct VideoChangeMessage {
     pub googleUserId: String,
     pub videoUrl: String
 }
+
+#[derive(Debug, Deserialize)]
+pub struct YoutubeVideoResponse {
+    title: String,
+    thumbnail_url: String
+}
