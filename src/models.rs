@@ -1,4 +1,4 @@
-use super::schema::{usermaster, social_identities};
+use super::schema::{usermaster, social_identities, userfriends};
 
 use chrono::NaiveDateTime;
 
@@ -17,7 +17,7 @@ pub struct UserFriend {
     pub id: i64,
     pub user_google_uid: String,
     pub friend_google_uid: String,
-    pub is_friend_excluded: String,
+    pub is_friend_excluded: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: Option<NaiveDateTime>
 }
@@ -73,4 +73,13 @@ pub struct NewSocialIdentity<'a> {
     pub uid: &'a str,
     pub image_url: &'a str,
     pub created_at: NaiveDateTime,
+}
+
+#[derive(Insertable)]
+#[table_name="userfriends"]
+pub struct NewUserFriend<'a> {
+    pub user_google_uid: &'a str,
+    pub friend_google_uid: &'a str,
+    pub is_friend_excluded: bool,
+    pub created_at: NaiveDateTime
 }

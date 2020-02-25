@@ -23,9 +23,9 @@ use serde_json::{Value as JsonValue, Error};
 use diesel::PgConnection;
 use diesel::prelude::*;
 
-use tubepeek_server_rust::models::{Usermaster, NewUser, NewSocialIdentity, SocialIdentity};
+use tubepeek_server_rust::models::{Usermaster, NewUser, NewSocialIdentity, SocialIdentity, NewUserFriend};
 use chrono::{Utc, NaiveDateTime};
-use std::ptr::null;
+// use std::ptr::null;
 // use serde_json::Result as JsResult;
 //use tubepeek_server_rust::schema::{usermaster};
 
@@ -39,15 +39,22 @@ lazy_static! {
 
 pub struct WsConnectedClientMetadata {
     pub socketId: u32,
-    // pub socket : &'a Sender,
+    pub socket : Sender,
     pub googleUserId: String,
     pub currentVideo: Option<WsConnectedClientCurrentVideo>,
+    pub onlineFriends: Box<Vec<WsOnlineFriend>>
 }
 
 pub struct WsConnectedClientCurrentVideo {
     pub videoUrl: String,
     pub title: String,
     pub thumbnail_url: String,
+}
+
+pub struct WsOnlineFriend {
+    pub socketId: u32,
+    pub socket : Sender,
+    pub googleUserId: String,
 }
 
 
@@ -85,7 +92,7 @@ impl Handler for WsServer {
             "UserChangedOnlineStatus" => handle_user_online_status_change(&raw_message, &database_connection),
             "AddThisPersonToMyFriendsList" => handle_frend_addition(&raw_message, &database_connection),
             "ChangedVideo" => handle_vidoe_change(&raw_message, &database_connection, &self.out),
-            _ => "Unknown message type. ".to_owned(),
+            _ => "Unknown message type".to_owned(),
         };
 
         // Message::Text(raw_message)
@@ -113,17 +120,18 @@ impl Handler for WsServer {
 }
 
 fn handle_social_identity(json : &str, connection: &PgConnection, ws_client: &Sender) -> String {
-    println!("Got TakeMySocialIdentity message.");
     let social_identity_maybe: Result<TakeSocialIdentityMessage, Error> = serde_json::from_str(json);
 
     use tubepeek_server_rust::schema::usermaster::dsl::*;
     use tubepeek_server_rust::schema::social_identities::dsl::*;
+    use tubepeek_server_rust::schema::userfriends::dsl::*;
 
     match social_identity_maybe {
         Ok(social_identity) => {
             let now = Utc::now().naive_utc();
             let auth_data_email = social_identity.authData.emailAddress.as_str();
             let google_user_id = social_identity.authData.googleUserId.as_str();
+            let friends = social_identity.friends;
 
             let save_social_identity = |user_record_id: i64, auth_data_email: &str, prov: String, auth_data: &AuthData, now: &NaiveDateTime|  {
                 let new_social_identity = NewSocialIdentity {
@@ -142,7 +150,8 @@ fn handle_social_identity(json : &str, connection: &PgConnection, ws_client: &Se
                     .expect("Error saving new social identity");
             };
 
-            let existing_user_results = usermaster.filter(tubepeek_server_rust::schema::usermaster::dsl::email_address.eq(&social_identity.authData.emailAddress))
+            let existing_user_results = usermaster
+                .filter(tubepeek_server_rust::schema::usermaster::dsl::email_address.eq(&social_identity.authData.emailAddress))
                 .limit(1)
                 .load::<Usermaster>(connection)
                 .expect("Error loading users");
@@ -180,12 +189,36 @@ fn handle_social_identity(json : &str, connection: &PgConnection, ws_client: &Se
                 save_social_identity(new_user_db_record.id, auth_data_email, social_identity.provider, &social_identity.authData, &now);
             }
 
+            for friend_auth in friends.iter() {
+                let existing_friend = userfriends
+                    .filter(tubepeek_server_rust::schema::userfriends::dsl::user_google_uid.eq(google_user_id)
+                        .and(tubepeek_server_rust::schema::userfriends::dsl::friend_google_uid.eq(&friend_auth.googleUserId)))
+                    .limit(1)
+                    .load::<tubepeek_server_rust::models::UserFriend>(connection)
+                    .expect("Error loading user social identity");
+
+                if(existing_friend.len() == 0) {
+                    let new_user_friend = NewUserFriend {
+                        user_google_uid: google_user_id,
+                        friend_google_uid: &friend_auth.googleUserId,
+                        is_friend_excluded: false,
+                        created_at: now,
+                    };
+
+                    let new_user_friend_db_record = diesel::insert_into(userfriends)
+                        .values(&new_user_friend)
+                        .get_result::<tubepeek_server_rust::models::UserFriend>(connection)
+                        .expect("Error saving new user friend");
+                }
+            }
+
             let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
             connected_clients.insert(ws_client.connection_id(), WsConnectedClientMetadata {
                 socketId: ws_client.connection_id(),
-                // socket: ws_client,
+                socket: ws_client.to_owned(),
                 googleUserId: google_user_id.to_owned(),
                 currentVideo: None,
+                onlineFriends: Box::new(vec![])
             });
 
             return "all good".to_owned()
