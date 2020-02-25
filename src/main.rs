@@ -36,11 +36,12 @@ use std::ptr::null;
 // However, I feel that for testing/mocking this won't be great.
 lazy_static! {
     static ref POOL: PgPool = { establish_connection() };
-    static ref WS_CONNECTED_CLIENTS: Mutex<HashMap<String, WsConnectedClientMetadata>> = Mutex::new(HashMap::new());
+    static ref WS_CONNECTED_CLIENTS: Mutex<HashMap<u32, WsConnectedClientMetadata>> = Mutex::new(HashMap::new());
 }
 
 pub struct WsConnectedClientMetadata {
     pub socketId: u32,
+    // pub socket : &'a Sender,
     pub googleUserId: String,
     pub currentVideo: Option<WsConnectedClientCurrentVideo>,
 }
@@ -98,6 +99,17 @@ impl Handler for WsServer {
     }
 
     fn on_close(&mut self, code: CloseCode, reason: &str) {
+        let client_conn_id = self.out.connection_id();
+
+        let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
+        let conn_metadata_maybe = connected_clients.get(&client_conn_id);
+
+        match conn_metadata_maybe {
+            Some(conn_metadata) => {
+                connected_clients.remove(&client_conn_id);
+            },
+            _ => println!("Don't panic"),
+        };
         match code {
             CloseCode::Normal => println!("The client is done with the connection."),
             CloseCode::Away   => println!("The client is leaving the site."),
@@ -174,8 +186,9 @@ fn handle_social_identity(json : &str, connection: &PgConnection, ws_client: &Se
             }
 
             let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
-            connected_clients.insert(google_user_id.to_owned(), WsConnectedClientMetadata {
+            connected_clients.insert(ws_client.connection_id(), WsConnectedClientMetadata {
                 socketId: ws_client.connection_id(),
+                // socket: ws_client,
                 googleUserId: google_user_id.to_owned(),
                 currentVideo: None,
             });
@@ -221,12 +234,9 @@ fn handle_vidoe_change(json : &str, connection: &PgConnection, ws_client: &Sende
             let youtube_response_maybe = reqwest::blocking::get(youtube_query_url.as_str());
             match youtube_response_maybe {
                 Ok(valid_response) => {
-                    // let mut buf = String::new();
-                    // valid_response. .read_to_string(&mut buf).expect("Failed to read response");
+                    let decoded_video_details = valid_response.json::<YoutubeVideoResponse>();
 
-                    let jsonified = valid_response.json::<YoutubeVideoResponse>();
-
-                    println!("eqweewewe {:#?}", jsonified);
+                    println!("decoded_video_details {:#?}", decoded_video_details);
                 },
                 Err(err_msg) => {
                     println!("Invalid video change.");
