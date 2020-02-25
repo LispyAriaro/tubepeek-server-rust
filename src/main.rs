@@ -283,15 +283,4 @@ fn main() {
     println!("Tubepeek server up and running ...");
 
     listen("127.0.0.1:9160", |out| WsServer { out: out } ).unwrap()
-
-//    listen("127.0.0.1:9160", |out| {
-//        move |msg| {
-//            let conn_id : u32 = out.connection_id();
-//
-//            println!("Connection id: {:?}", conn_id);
-//            println!("Received messaage: {:?}", msg);
-//
-//            out.send(msg)
-//        }
-//    }).unwrap()
 }
