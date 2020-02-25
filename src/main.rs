@@ -27,10 +27,8 @@ use tubepeek_server_rust::models::{Usermaster, NewUser, NewSocialIdentity, Socia
 use chrono::{Utc, NaiveDateTime};
 use std::ptr::null;
 // use serde_json::Result as JsResult;
-
-
-
 //use tubepeek_server_rust::schema::{usermaster};
+
 
 // Using lazy static to have a global reference to my connection pool
 // However, I feel that for testing/mocking this won't be great.
@@ -67,30 +65,26 @@ pub enum WsMessageType {
 impl Handler for WsServer {
     fn on_message(&mut self, msg: Message) -> WsResult<()> {
         let raw_message = msg.into_text().unwrap();
-        let json = &raw_message[..];
-        println!("The message from the client is {:#?}", json);
+        println!("The message from the client is {:#?}", &raw_message);
 
         let get_json_value = || -> Result<JsonValue, Error> {
-            let v: JsonValue = serde_json::from_str(json)?;
+            let v: JsonValue = serde_json::from_str(&raw_message)?;
             Ok(v)
         };
 
-        let v: Result<JsonValue, Error> = get_json_value();
-
-        if let Err(_err) = v {
+        let json_maybe: Result<JsonValue, Error> = get_json_value();
+        if let Err(_err) = json_maybe {
             return self.out.send("Invalid json value")
         }
 
-        let v: JsonValue = v.unwrap();
-
         let pool = POOL.clone();
-        let database_connection = pool.get().expect("Failed to get pooled connection"); // Not sure when a panic is triggered here
+        let database_connection = pool.get().expect("Failed to get pooled connection");
 
-        let response = match v["messageType"].as_str().unwrap() {
-            "TakeMySocialIdentity" => handle_social_identity(json, &database_connection, &self.out),
-            "UserChangedOnlineStatus" => handle_user_online_status_change(json, &database_connection),
-            "AddThisPersonToMyFriendsList" => handle_frend_addition(json, &database_connection),
-            "ChangedVideo" => handle_vidoe_change(json, &database_connection, &self.out),
+        let response = match json_maybe.unwrap()["messageType"].as_str().unwrap() {
+            "TakeMySocialIdentity" => handle_social_identity(&raw_message, &database_connection, &self.out),
+            "UserChangedOnlineStatus" => handle_user_online_status_change(&raw_message, &database_connection),
+            "AddThisPersonToMyFriendsList" => handle_frend_addition(&raw_message, &database_connection),
+            "ChangedVideo" => handle_vidoe_change(&raw_message, &database_connection, &self.out),
             _ => "Unknown message type. ".to_owned(),
         };
 
@@ -161,7 +155,8 @@ fn handle_social_identity(json : &str, connection: &PgConnection, ws_client: &Se
                     .expect("Error loading user social identity");
 
                 if(existing_social_identity.len() > 0) {
-                    diesel::update(social_identities.filter(tubepeek_server_rust::schema::social_identities::dsl::id.eq(existing_social_identity[0].id)))
+                    diesel::update(social_identities.filter(
+                        tubepeek_server_rust::schema::social_identities::dsl::id.eq(existing_social_identity[0].id)))
                         .set((
                             tubepeek_server_rust::schema::social_identities::dsl::full_name.eq(&social_identity.authData.fullName),
                             tubepeek_server_rust::schema::social_identities::dsl::image_url.eq(&social_identity.authData.imageUrl),
