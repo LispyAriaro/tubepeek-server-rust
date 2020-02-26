@@ -42,6 +42,6 @@ pub struct VideoChangeMessage {
 
 #[derive(Debug, Deserialize)]
 pub struct YoutubeVideoResponse {
-    title: String,
-    thumbnail_url: String
+    pub title: String,
+    pub thumbnail_url: String
 }
