@@ -106,8 +106,6 @@ impl Handler for WsServer {
             "ChangedVideo" => handle_vidoe_change(&raw_message, &database_connection, &self.out),
             _ => "Unknown message type".to_owned(),
         };
-
-        // Message::Text(raw_message)
         self.out.send(response)
     }
 
@@ -310,10 +308,8 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
             let video_url = video_change.videoUrl.as_str();
             let google_user_id = video_change.googleUserId.as_str();
             let youtube_query_url = format!(
-                "http://www.youtube.com{}{}",
-                "/oembed?format=json&url=", video_url
+                "http://www.youtube.com{}{}", "/oembed?format=json&url=", video_url
             );
-            println!("youtube_query_url: {}", youtube_query_url);
 
             let youtube_response_maybe = reqwest::blocking::get(youtube_query_url.as_str());
             match youtube_response_maybe {
@@ -326,6 +322,8 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                     let client_conn_id = ws_client.connection_id();
 
                     let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
+                    println!("connected_clients: {:?}", connected_clients);
+
                     let conn_metadata_maybe: Option<&mut WsConnectedClientMetadata> =
                         connected_clients.get_mut(&client_conn_id);
 
@@ -336,14 +334,6 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                                 title: video_title.to_string(),
                                 thumbnail_url: video_thumbnail.to_string(),
                             });
-
-                            // FOR THE LOVE OF GOD, I AM JUST TRYING TO PRINT THIS. BUT BORROW CHECKER IS NOT ALLOWING ME.
-                            // WITH THE LINE COMMENTED OUT, THE PROGRAM RUNS THOUGH.
-                            // println!("connected_clients: {:?}", connected_clients);
-
-                            // connected_clients
-                            //     .entry(client_conn_id)
-                            //     .or_insert(conn_metadata);
 
                             let broadcast_data = json!({
                                 "action": "TakeFriendVideoChange",
@@ -358,16 +348,14 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                             for friend in conn_metadata.onlineFriends.iter() {
                                 friend.socket.send(broadcast_data.to_string());
                             }
-                        }
-                        _ => println!("Don't panic"),
+                        },
+                        _ => println!("Don't panic kkkkkkkk"),
                     };
-
-                    // println!("decoded_video_details {:#?}", &decoded_video_details);
                 }
                 Err(err_msg) => {
                     println!("Invalid video change.");
                 }
-            }
+            };
         }
         Err(err_msg) => {
             println!("Invalid video change.");
