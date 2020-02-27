@@ -31,7 +31,7 @@ create table social_identities (
 create table videos (
   id bigserial primary key not null,
   video_url text not null,
-  youtube_video_id text,
+  youtube_video_id text not null,
   video_title text not null,
   created_at timestamp not null,
   updated_at timestamp

@@ -46,7 +46,7 @@ table! {
     videos (id) {
         id -> Int8,
         video_url -> Text,
-        youtube_video_id -> Nullable<Text>,
+        youtube_video_id -> Text,
         video_title -> Text,
         created_at -> Timestamp,
         updated_at -> Nullable<Timestamp>,

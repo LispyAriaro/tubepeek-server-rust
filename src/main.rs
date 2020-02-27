@@ -2,8 +2,9 @@ extern crate ws;
 
 #[macro_use]
 extern crate lazy_static;
-
 extern crate reqwest;
+extern crate regex;
+
 extern crate tubepeek_server_rust;
 
 mod db_connection;
@@ -11,6 +12,9 @@ use db_connection::{establish_connection, PgPool};
 
 mod ws_dto;
 use ws_dto::*;
+
+mod utils;
+use utils::*;
 
 use ws::Result as WsResult;
 use ws::{listen, CloseCode, Handler, Message, Sender};
@@ -23,9 +27,7 @@ use diesel::PgConnection;
 use serde_json::{json, Error, Value as JsonValue};
 
 use chrono::{NaiveDateTime, Utc};
-use tubepeek_server_rust::models::{
-    NewSocialIdentity, NewUser, NewUserFriend, SocialIdentity, Usermaster,
-};
+use tubepeek_server_rust::models::{NewSocialIdentity, NewUser, NewUserFriend, SocialIdentity, Usermaster, Video, NewVideo, UserVideo, NewUserVideo};
 // use std::ptr::null;
 // use serde_json::Result as JsResult;
 //use tubepeek_server_rust::schema::{usermaster};
@@ -262,6 +264,7 @@ fn handle_social_identity(json: &str, connection: &PgConnection, ws_client: &Sen
             }
 
             let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
+
             connected_clients.insert(
                 ws_client.connection_id(),
                 WsConnectedClientMetadata {
@@ -272,6 +275,8 @@ fn handle_social_identity(json: &str, connection: &PgConnection, ws_client: &Sen
                     onlineFriends: Box::new(vec![]),
                 },
             );
+
+            println!("connected_clients: {:?}", connected_clients);
 
             return "all good".to_owned();
         }
@@ -351,6 +356,8 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                         },
                         _ => println!("Don't panic kkkkkkkk"),
                     };
+
+                    persist_video_watched(google_user_id, video_url, video_title.as_str(), connection);
                 }
                 Err(err_msg) => {
                     println!("Invalid video change.");
@@ -362,6 +369,90 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
         }
     };
     "All good".to_owned()
+}
+
+fn persist_video_watched(google_user_id: &str, videoUrl: &str, videoTitle: &str, connection: &PgConnection) {
+    use tubepeek_server_rust::schema::social_identities::dsl::*;
+    use tubepeek_server_rust::schema::videos::dsl::*;
+    use tubepeek_server_rust::schema::uservideos::dsl::*;
+
+    let now = Utc::now().naive_utc();
+
+    let youtube_video_id_maybe: Option<String> = get_youtube_videoid(videoUrl);
+    if let None = youtube_video_id_maybe {
+        println!("Invalid youtube url metadata");
+        return;
+    }
+
+    let youtubeVideoId = youtube_video_id_maybe.unwrap();
+
+    let save_user_video =
+        |userId: i64,
+         videoId: i64,
+         now: &NaiveDateTime| {
+            let new_user_video = NewUserVideo {
+                user_id: userId,
+                video_id: videoId,
+                created_at: *now,
+            };
+
+            diesel::insert_into(uservideos)
+                .values(&new_user_video)
+                .execute(connection)
+                .expect("Error saving new user video");
+        };
+
+    let existing_social_identity = social_identities
+        .filter(
+            tubepeek_server_rust::schema::social_identities::dsl::uid
+                .eq(google_user_id)
+                .and(
+                    tubepeek_server_rust::schema::social_identities::dsl::provider
+                        .eq("google")
+                ),
+        )
+        .load::<SocialIdentity>(connection)
+        .expect("Error loading user social identity");
+
+    if (existing_social_identity.len() > 0) {
+        let existing_video = videos
+            .filter(
+                tubepeek_server_rust::schema::videos::dsl::youtube_video_id
+                    .eq(&youtubeVideoId)
+            )
+            .load::<Video>(connection)
+            .expect("Error loading video");
+
+        if (existing_video.len() == 0) {
+            let new_video = NewVideo {
+                video_url: videoUrl,
+                youtube_video_id: &youtubeVideoId,
+                video_title: videoTitle,
+                created_at: now,
+            };
+
+            let new_video_db_record = diesel::insert_into(videos)
+                .values(&new_video)
+                .get_result::<Video>(connection)
+                .expect("Error saving new video");
+
+            save_user_video(existing_social_identity[0].user_id, new_video_db_record.id, &now);
+        } else {
+            let existing_user_video = uservideos
+                .filter(
+                    tubepeek_server_rust::schema::uservideos::dsl::user_id
+                        .eq(existing_social_identity[0].user_id)
+                        .and(tubepeek_server_rust::schema::uservideos::dsl::video_id
+                            .eq(existing_video[0].id))
+                )
+                .load::<UserVideo>(connection)
+                .expect("Error loading user video");
+
+            if (existing_user_video.len() == 0) {
+                save_user_video(existing_social_identity[0].user_id, existing_video[0].id, &now);
+            }
+        }
+    }
 }
 
 fn main() {
