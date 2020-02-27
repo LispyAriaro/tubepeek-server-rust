@@ -344,19 +344,31 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
 
                     let client_conn_id = ws_client.connection_id();
 
+                    {
+                        let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
+
+                        let conn_metadata_maybe: Option<&mut WsConnectedClientMetadata> =
+                            connected_clients.get_mut(&client_conn_id);
+
+                        match conn_metadata_maybe {
+                            Some(conn_metadata) => {
+                                conn_metadata.currentVideo = Some(WsConnectedClientCurrentVideo {
+                                    videoUrl: video_url.to_string(),
+                                    title: video_title.to_string(),
+                                    thumbnail_url: video_thumbnail.to_string(),
+                                });
+                            },
+                            _ => println!("Don't panic kkkkkkkk"),
+                        };
+                    }
+
                     let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
 
-                    let conn_metadata_maybe: Option<&mut WsConnectedClientMetadata> =
-                        connected_clients.get_mut(&client_conn_id);
+                    let conn_metadata_maybe: Option<&WsConnectedClientMetadata> =
+                        connected_clients.get(&client_conn_id);
 
                     match conn_metadata_maybe {
                         Some(conn_metadata) => {
-                            conn_metadata.currentVideo = Some(WsConnectedClientCurrentVideo {
-                                videoUrl: video_url.to_string(),
-                                title: video_title.to_string(),
-                                thumbnail_url: video_thumbnail.to_string(),
-                            });
-
                             let broadcast_data = json!({
                                 "action": "TakeFriendVideoChange",
                                 "googleUserId": google_user_id,
@@ -367,22 +379,23 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                                 }
                             });
 
-                            {
-//                                for friend in conn_metadata.onlineFriends.iter() {
-//                                    let friend_conn_maybe: Option<&WsConnectedClientMetadata> =
-//                                        connected_clients.get(&friend.socketId);
-//
-//                                    match friend_conn_maybe {
-//                                        Some(conn) => {
-//                                            conn.socket.send(broadcast_data.to_string());
-//                                        },
-//                                        None => println!("Done not")
-//                                    };
-//                                }
+                            for friend in conn_metadata.onlineFriends.iter() {
+                                let friend_conn_maybe: Option<&WsConnectedClientMetadata> =
+                                    connected_clients.get(&friend.socketId);
+
+                                match friend_conn_maybe {
+                                    Some(conn) => {
+                                        conn.socket.send(broadcast_data.to_string());
+                                    },
+                                    None => println!("Done not")
+                                };
                             }
                         },
                         _ => println!("Don't panic kkkkkkkk"),
                     };
+
+                    println!("connected_clients: {:?}", connected_clients);
+                    println!("Got to this point ...");
 
                     persist_video_watched(google_user_id, video_url, video_title.as_str(), connection);
                 }
