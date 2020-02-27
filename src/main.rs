@@ -28,9 +28,7 @@ use serde_json::{json, Error, Value as JsonValue};
 
 use chrono::{NaiveDateTime, Utc};
 use tubepeek_server_rust::models::{NewSocialIdentity, NewUser, NewUserFriend, SocialIdentity, Usermaster, Video, NewVideo, UserVideo, NewUserVideo};
-// use std::ptr::null;
-// use serde_json::Result as JsResult;
-//use tubepeek_server_rust::schema::{usermaster};
+
 
 // Using lazy static to have a global reference to my connection pool
 // However, I feel that for testing/mocking this won't be great.
@@ -59,7 +57,6 @@ pub struct WsConnectedClientCurrentVideo {
 #[derive(Debug)]
 pub struct WsOnlineFriend {
     pub socketId: u32,
-    pub socket: Sender,
     pub googleUserId: String,
 }
 
@@ -119,6 +116,24 @@ impl Handler for WsServer {
 
         match conn_metadata_maybe {
             Some(conn_metadata) => {
+                let broadcast_data = json!({
+                    "action": "TakeFriendOnlineStatus",
+                    "googleUserId": conn_metadata.googleUserId,
+                    "onlineState": false
+                });
+
+                for friend in conn_metadata.onlineFriends.iter() {
+                    let friend_conn_maybe: Option<&WsConnectedClientMetadata> =
+                        connected_clients.get(&friend.socketId);
+
+                    match friend_conn_maybe {
+                        Some(conn) => {
+                            conn.socket.send(broadcast_data.to_string());
+                        },
+                        None => println!("Done not")
+                    };
+                }
+
                 connected_clients.remove(&client_conn_id);
             }
             _ => println!("Don't panic"),
@@ -144,7 +159,6 @@ fn handle_social_identity(json: &str, connection: &PgConnection, ws_client: &Sen
             let now = Utc::now().naive_utc();
             let auth_data_email = social_identity.authData.emailAddress.as_str();
             let google_user_id = social_identity.authData.googleUserId.as_str();
-            let friends = social_identity.friends;
 
             let save_social_identity =
                 |user_record_id: i64,
@@ -234,47 +248,51 @@ fn handle_social_identity(json: &str, connection: &PgConnection, ws_client: &Sen
                 );
             }
 
-            for friend_auth in friends.iter() {
-                let existing_friend = userfriends
-                    .filter(
-                        tubepeek_server_rust::schema::userfriends::dsl::user_google_uid
-                            .eq(google_user_id)
-                            .and(
-                                tubepeek_server_rust::schema::userfriends::dsl::friend_google_uid
-                                    .eq(&friend_auth.googleUserId),
-                            ),
-                    )
-                    .limit(1)
-                    .load::<tubepeek_server_rust::models::UserFriend>(connection)
-                    .expect("Error loading user social identity");
+            //--
+            let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
 
-                if (existing_friend.len() == 0) {
-                    let new_user_friend = NewUserFriend {
-                        user_google_uid: google_user_id,
-                        friend_google_uid: &friend_auth.googleUserId,
-                        is_friend_excluded: false,
-                        created_at: now,
-                    };
-
-                    let new_user_friend_db_record = diesel::insert_into(userfriends)
-                        .values(&new_user_friend)
-                        .get_result::<tubepeek_server_rust::models::UserFriend>(connection)
-                        .expect("Error saving new user friend");
+            let mut is_connected_already = false;
+            for (conn_id, meta) in connected_clients.iter() {
+                if(meta.googleUserId == google_user_id) {
+                    is_connected_already = true;
                 }
             }
 
-            let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
+            if is_connected_already == false {
+                let mut online_friends : Vec<WsOnlineFriend> = vec![];
 
-            connected_clients.insert(
-                ws_client.connection_id(),
-                WsConnectedClientMetadata {
-                    socketId: ws_client.connection_id(),
-                    socket: ws_client.to_owned(),
-                    googleUserId: google_user_id.to_owned(),
-                    currentVideo: None,
-                    onlineFriends: Box::new(vec![]),
-                },
-            );
+                let existing_friends = userfriends
+                    .filter(
+                        tubepeek_server_rust::schema::userfriends::dsl::user_google_uid
+                            .eq(google_user_id),
+                    )
+                    .load::<tubepeek_server_rust::models::UserFriend>(connection)
+                    .expect("Error loading userfriends");
+
+                if (existing_friends.len() > 0) {
+                    for friend in existing_friends {
+                        for (conn_id, meta) in connected_clients.iter() {
+                            if(meta.googleUserId == friend.friend_google_uid) {
+                                online_friends.push(WsOnlineFriend {
+                                    socketId: meta.socketId,
+                                    googleUserId: meta.googleUserId.to_string()
+                                });
+                            }
+                        }
+                    }
+                }
+
+                connected_clients.insert(
+                    ws_client.connection_id(),
+                    WsConnectedClientMetadata {
+                        socketId: ws_client.connection_id(),
+                        socket: ws_client.to_owned(),
+                        googleUserId: google_user_id.to_owned(),
+                        currentVideo: None,
+                        onlineFriends: Box::new(online_friends)
+                    },
+                );
+            }
 
             println!("connected_clients: {:?}", connected_clients);
 
@@ -327,7 +345,6 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                     let client_conn_id = ws_client.connection_id();
 
                     let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
-                    println!("connected_clients: {:?}", connected_clients);
 
                     let conn_metadata_maybe: Option<&mut WsConnectedClientMetadata> =
                         connected_clients.get_mut(&client_conn_id);
@@ -350,8 +367,18 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                                 }
                             });
 
-                            for friend in conn_metadata.onlineFriends.iter() {
-                                friend.socket.send(broadcast_data.to_string());
+                            {
+//                                for friend in conn_metadata.onlineFriends.iter() {
+//                                    let friend_conn_maybe: Option<&WsConnectedClientMetadata> =
+//                                        connected_clients.get(&friend.socketId);
+//
+//                                    match friend_conn_maybe {
+//                                        Some(conn) => {
+//                                            conn.socket.send(broadcast_data.to_string());
+//                                        },
+//                                        None => println!("Done not")
+//                                    };
+//                                }
                             }
                         },
                         _ => println!("Don't panic kkkkkkkk"),

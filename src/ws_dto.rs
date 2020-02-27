@@ -22,15 +22,7 @@ pub struct AuthData {
 pub struct TakeSocialIdentityMessage {
     pub messageType: String,
     pub provider: String,
-    pub authData: AuthData,
-    pub friends: Vec<UserFriend>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct UserFriend {
-    pub googleUserId: String,
-    pub fullName: String,
-    pub imageUrl: String,
+    pub authData: AuthData
 }
 
 #[derive(Serialize, Deserialize)]
