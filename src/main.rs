@@ -18,6 +18,7 @@ use utils::*;
 
 use ws::Result as WsResult;
 use ws::{listen, CloseCode, Handler, Message, Sender};
+use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -28,6 +29,7 @@ use serde_json::{json, Error, Value as JsonValue};
 
 use chrono::{NaiveDateTime, Utc};
 use tubepeek_server_rust::models::{NewSocialIdentity, NewUser, NewUserFriend, SocialIdentity, Usermaster, Video, NewVideo, UserVideo, NewUserVideo};
+
 
 
 // Using lazy static to have a global reference to my connection pool
@@ -47,7 +49,7 @@ pub struct WsConnectedClientMetadata {
     pub onlineFriends: Box<Vec<WsOnlineFriend>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WsConnectedClientCurrentVideo {
     pub videoUrl: String,
     pub title: String,
@@ -58,6 +60,12 @@ pub struct WsConnectedClientCurrentVideo {
 pub struct WsOnlineFriend {
     pub socketId: u32,
     pub googleUserId: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WsFriendCurrentVideo {
+    pub googleUserId: String,
+    pub videoData: WsConnectedClientCurrentVideo,
 }
 
 struct WsServer {
@@ -135,6 +143,8 @@ impl Handler for WsServer {
                 }
 
                 connected_clients.remove(&client_conn_id);
+
+                println!("connected_clients[ON_DISCONNECT]: {:?}", connected_clients);
             }
             _ => println!("Don't panic"),
         };
@@ -156,134 +166,58 @@ fn handle_social_identity(json: &str, connection: &PgConnection, ws_client: &Sen
 
     match social_identity_maybe {
         Ok(social_identity) => {
-            let now = Utc::now().naive_utc();
-            let auth_data_email = social_identity.authData.emailAddress.as_str();
-            let google_user_id = social_identity.authData.googleUserId.as_str();
+            let google_user_id = &social_identity.authData.googleUserId.to_owned();
 
-            let save_social_identity =
-                |user_record_id: i64,
-                 auth_data_email: &str,
-                 prov: String,
-                 auth_data: &AuthData,
-                 now: &NaiveDateTime| {
-                    let new_social_identity = NewSocialIdentity {
-                        user_id: user_record_id,
-                        provider: prov,
-                        email_address: auth_data_email,
-                        full_name: auth_data.fullName.as_str(),
-                        uid: auth_data.googleUserId.as_str(),
-                        image_url: auth_data.imageUrl.as_str(),
-                        created_at: *now,
-                    };
-
-                    let new_social_id_db_record = diesel::insert_into(social_identities)
-                        .values(&new_social_identity)
-                        .execute(connection)
-                        .expect("Error saving new social identity");
-                };
-
-            let existing_user_results = usermaster
-                .filter(
-                    tubepeek_server_rust::schema::usermaster::dsl::email_address
-                        .eq(&social_identity.authData.emailAddress),
-                )
-                .limit(1)
-                .load::<Usermaster>(connection)
-                .expect("Error loading users");
-
-            if existing_user_results.len() > 0 {
-                let existing_social_identity = social_identities
-                    .filter(
-                        tubepeek_server_rust::schema::social_identities::dsl::user_id
-                            .eq(existing_user_results[0].id)
-                            .and(
-                                tubepeek_server_rust::schema::social_identities::dsl::provider
-                                    .eq(&social_identity.provider),
-                            ),
-                    )
-                    .load::<SocialIdentity>(connection)
-                    .expect("Error loading user social identity");
-
-                if (existing_social_identity.len() > 0) {
-                    diesel::update(
-                        social_identities.filter(
-                            tubepeek_server_rust::schema::social_identities::dsl::id
-                                .eq(existing_social_identity[0].id),
-                        ),
-                    )
-                    .set((
-                        tubepeek_server_rust::schema::social_identities::dsl::full_name
-                            .eq(&social_identity.authData.fullName),
-                        tubepeek_server_rust::schema::social_identities::dsl::image_url
-                            .eq(&social_identity.authData.imageUrl),
-                        tubepeek_server_rust::schema::social_identities::dsl::updated_at.eq(&now),
-                    ))
-                    .execute(connection);
-                } else {
-                    save_social_identity(
-                        existing_user_results[0].id,
-                        auth_data_email,
-                        social_identity.provider,
-                        &social_identity.authData,
-                        &now,
-                    );
-                }
-            } else {
-                let new_user = NewUser {
-                    email_address: auth_data_email,
-                    created_at: now,
-                };
-
-                let new_user_db_record = diesel::insert_into(usermaster)
-                    .values(&new_user)
-                    .get_result::<Usermaster>(connection)
-                    .expect("Error saving new user");
-
-                save_social_identity(
-                    new_user_db_record.id,
-                    auth_data_email,
-                    social_identity.provider,
-                    &social_identity.authData,
-                    &now,
-                );
-            }
-
+            persist_user(social_identity, connection);
             //--
+            let existing_friends = userfriends
+                .filter(
+                    tubepeek_server_rust::schema::userfriends::dsl::user_google_uid
+                        .eq(google_user_id),
+                )
+                .load::<tubepeek_server_rust::models::UserFriend>(connection)
+                .expect("Error loading userfriends");
+
             let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
 
             let mut is_connected_already = false;
             for (conn_id, meta) in connected_clients.iter() {
-                if(meta.googleUserId == google_user_id) {
+                if(meta.googleUserId == *google_user_id) {
                     is_connected_already = true;
+                    break;
+                }
+            }
+
+            let mut online_friends : Vec<WsOnlineFriend> = vec![];
+            let mut friends_current_video : Vec<WsFriendCurrentVideo> = vec![];
+
+            for friend in existing_friends {
+                for (conn_id, meta) in connected_clients.iter() {
+                    if(meta.googleUserId == friend.friend_google_uid) {
+                        online_friends.push(WsOnlineFriend {
+                            socketId: meta.socketId,
+                            googleUserId: meta.googleUserId.to_string()
+                        });
+
+                        match &meta.currentVideo {
+                            Some(videoDetails) => {
+                                friends_current_video.push(WsFriendCurrentVideo {
+                                    googleUserId: meta.googleUserId.to_string(),
+                                    videoData: WsConnectedClientCurrentVideo {
+                                        videoUrl: videoDetails.videoUrl.to_string(),
+                                        title: videoDetails.title.to_string(),
+                                        thumbnail_url: videoDetails.thumbnail_url.to_string()
+                                    }
+                                });
+                            },
+                            None => {}
+                        };
+                    }
                 }
             }
 
             if is_connected_already == false {
-                let mut online_friends : Vec<WsOnlineFriend> = vec![];
-
-                let existing_friends = userfriends
-                    .filter(
-                        tubepeek_server_rust::schema::userfriends::dsl::user_google_uid
-                            .eq(google_user_id),
-                    )
-                    .load::<tubepeek_server_rust::models::UserFriend>(connection)
-                    .expect("Error loading userfriends");
-
-                if (existing_friends.len() > 0) {
-                    for friend in existing_friends {
-                        for (conn_id, meta) in connected_clients.iter() {
-                            if(meta.googleUserId == friend.friend_google_uid) {
-                                online_friends.push(WsOnlineFriend {
-                                    socketId: meta.socketId,
-                                    googleUserId: meta.googleUserId.to_string()
-                                });
-                            }
-                        }
-                    }
-                }
-
-                connected_clients.insert(
-                    ws_client.connection_id(),
+                connected_clients.insert(ws_client.connection_id(),
                     WsConnectedClientMetadata {
                         socketId: ws_client.connection_id(),
                         socket: ws_client.to_owned(),
@@ -292,11 +226,27 @@ fn handle_social_identity(json: &str, connection: &PgConnection, ws_client: &Sen
                         onlineFriends: Box::new(online_friends)
                     },
                 );
+            } else {
+                let conn_metadata_maybe: Option<&mut WsConnectedClientMetadata> =
+                    connected_clients.get_mut(&ws_client.connection_id());
+
+                match conn_metadata_maybe {
+                    Some(conn_metadata) => {
+                        conn_metadata.onlineFriends = Box::new(online_friends);
+                    },
+                    _ => println!("Don't panic kkkkkkkk"),
+                };
             }
 
             println!("connected_clients: {:?}", connected_clients);
 
-            return "all good".to_owned();
+            let dataToReplyWith = json!({
+                "action": "TakeVideosBeingWatched",
+                "friendsOnYoutubeNow": friends_current_video,
+                "friendsOnTubePeek": []
+            });
+
+            return dataToReplyWith.to_string();
         }
         Err(err_msg) => {
             println!("Invalid take social identity.");
@@ -306,6 +256,105 @@ fn handle_social_identity(json: &str, connection: &PgConnection, ws_client: &Sen
 
     "All good".to_owned()
 }
+
+
+fn persist_user(social_identity: TakeSocialIdentityMessage, connection: &PgConnection) {
+    use tubepeek_server_rust::schema::social_identities::dsl::*;
+    use tubepeek_server_rust::schema::usermaster::dsl::*;
+
+    let now = Utc::now().naive_utc();
+    let auth_data_email = social_identity.authData.emailAddress.as_str();
+    let google_user_id = social_identity.authData.googleUserId.as_str();
+
+    let save_social_identity =
+        |user_record_id: i64,
+         auth_data_email: &str,
+         prov: String,
+         auth_data: &AuthData,
+         now: &NaiveDateTime| {
+            let new_social_identity = NewSocialIdentity {
+                user_id: user_record_id,
+                provider: prov,
+                email_address: auth_data_email,
+                full_name: auth_data.fullName.as_str(),
+                uid: auth_data.googleUserId.as_str(),
+                image_url: auth_data.imageUrl.as_str(),
+                created_at: *now,
+            };
+
+            let new_social_id_db_record = diesel::insert_into(social_identities)
+                .values(&new_social_identity)
+                .execute(connection)
+                .expect("Error saving new social identity");
+        };
+
+    let existing_user_results = usermaster
+        .filter(
+            tubepeek_server_rust::schema::usermaster::dsl::email_address
+                .eq(&social_identity.authData.emailAddress),
+        )
+        .limit(1)
+        .load::<Usermaster>(connection)
+        .expect("Error loading users");
+
+    if existing_user_results.len() > 0 {
+        let existing_social_identity = social_identities
+            .filter(
+                tubepeek_server_rust::schema::social_identities::dsl::user_id
+                    .eq(existing_user_results[0].id)
+                    .and(
+                        tubepeek_server_rust::schema::social_identities::dsl::provider
+                            .eq(&social_identity.provider),
+                    ),
+            )
+            .load::<SocialIdentity>(connection)
+            .expect("Error loading user social identity");
+
+        if (existing_social_identity.len() > 0) {
+            diesel::update(
+                social_identities.filter(
+                    tubepeek_server_rust::schema::social_identities::dsl::id
+                        .eq(existing_social_identity[0].id),
+                ),
+            )
+                .set((
+                    tubepeek_server_rust::schema::social_identities::dsl::full_name
+                        .eq(&social_identity.authData.fullName),
+                    tubepeek_server_rust::schema::social_identities::dsl::image_url
+                        .eq(&social_identity.authData.imageUrl),
+                    tubepeek_server_rust::schema::social_identities::dsl::updated_at.eq(&now),
+                ))
+                .execute(connection);
+        } else {
+            save_social_identity(
+                existing_user_results[0].id,
+                auth_data_email,
+                social_identity.provider,
+                &social_identity.authData,
+                &now,
+            );
+        }
+    } else {
+        let new_user = NewUser {
+            email_address: auth_data_email,
+            created_at: now,
+        };
+
+        let new_user_db_record = diesel::insert_into(usermaster)
+            .values(&new_user)
+            .get_result::<Usermaster>(connection)
+            .expect("Error saving new user");
+
+        save_social_identity(
+            new_user_db_record.id,
+            auth_data_email,
+            social_identity.provider,
+            &social_identity.authData,
+            &now,
+        );
+    }
+}
+
 
 fn handle_user_online_status_change(json: &str, connection: &PgConnection) -> String {
     println!("Got UserChangedOnlineStatus message.");
@@ -398,12 +447,12 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                     println!("Got to this point ...");
 
                     persist_video_watched(google_user_id, video_url, video_title.as_str(), connection);
-                }
+                },
                 Err(err_msg) => {
-                    println!("Invalid video change.");
+                    println!("Invalid video change. {:?}", err_msg);
                 }
             };
-        }
+        },
         Err(err_msg) => {
             println!("Invalid video change.");
         }
@@ -498,5 +547,8 @@ fn persist_video_watched(google_user_id: &str, videoUrl: &str, videoTitle: &str,
 fn main() {
     println!("Tubepeek server up and running ...");
 
-    listen("127.0.0.1:9160", |out| WsServer { out: out }).unwrap()
+    let server_ip = "192.168.88.205:9160";
+    // let server_ip = "127.0.0.1:9160";
+
+    listen(server_ip, |out| WsServer { out: out }).unwrap()
 }

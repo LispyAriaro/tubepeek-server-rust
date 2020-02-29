@@ -13,8 +13,6 @@ pub struct AuthData {
     pub googleUserId: String,
     pub fullName: String,
     pub emailAddress: String,
-    pub accessToken: String,
-    pub accessTokenExpiry: String,
     pub imageUrl: String
 }
 
