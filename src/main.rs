@@ -28,7 +28,7 @@ use diesel::PgConnection;
 use serde_json::{json, Error, Value as JsonValue};
 
 use chrono::{NaiveDateTime, Utc};
-use tubepeek_server_rust::models::{NewSocialIdentity, NewUser, NewUserFriend, SocialIdentity, Usermaster, Video, NewVideo, UserVideo, NewUserVideo};
+use tubepeek_server_rust::models::{NewSocialIdentity, NewUser, NewUserFriend, SocialIdentity, Usermaster, Video, NewVideo, UserVideo, NewUserVideo, UserFriend};
 
 
 
@@ -103,13 +103,13 @@ impl Handler for WsServer {
         let response = match json_maybe.unwrap()["messageType"].as_str().unwrap() {
             "TakeMySocialIdentity" => {
                 handle_social_identity(&raw_message, &database_connection, &self.out)
-            }
+            },
             "UserChangedOnlineStatus" => {
                 handle_user_online_status_change(&raw_message, &database_connection, &self.out)
-            }
-            "AddThisPersonToMyFriendsList" => {
-                handle_frend_addition(&raw_message, &database_connection)
-            }
+            },
+            "MakeFriendship" => {
+                handle_friendship(&raw_message, &database_connection, &self.out)
+            },
             "ChangedVideo" => handle_vidoe_change(&raw_message, &database_connection, &self.out),
             _ => "Unknown message type".to_owned(),
         };
@@ -375,8 +375,8 @@ fn handle_user_online_status_change(json: &str, connection: &PgConnection, ws_cl
 
             let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
 
-            let conn_metadata_maybe: Option<&mut WsConnectedClientMetadata> =
-                connected_clients.get_mut(&ws_client.connection_id());
+            let conn_metadata_maybe: Option<&WsConnectedClientMetadata> =
+                connected_clients.get(&ws_client.connection_id());
 
             match conn_metadata_maybe {
                 Some(conn_metadata) => {
@@ -400,15 +400,130 @@ fn handle_user_online_status_change(json: &str, connection: &PgConnection, ws_cl
             }
         },
         Err(err_msg) => {
-            println!("Invalid take online status change.");
+            println!("Invalid take online status.");
         }
     };
 
     "All good".to_owned()
 }
 
-fn handle_frend_addition(json: &str, connection: &PgConnection) -> String {
-    println!("Got AddThisPersonToMyFriendsList message.");
+fn handle_friendship(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
+    println!("Got MakeFriendship message.");
+
+    use tubepeek_server_rust::schema::social_identities::dsl::*;
+    use tubepeek_server_rust::schema::usermaster::dsl::*;
+    use tubepeek_server_rust::schema::userfriends::dsl::*;
+
+    let make_friendship_maybe: Result<MakeFriendshipMessage, Error> =
+        serde_json::from_str(json);
+
+    match make_friendship_maybe {
+        Ok(make_friendship) => {
+            let google_user_id = &make_friendship.googleUserId.to_owned();
+            let friend_google_user_id = &make_friendship.googleUserId.to_owned();
+            let now = Utc::now().naive_utc();
+
+            let does_friend_exist = userfriends
+                .filter(
+                    tubepeek_server_rust::schema::userfriends::dsl::user_google_uid
+                        .eq(&google_user_id)
+                        .and(tubepeek_server_rust::schema::userfriends::dsl::friend_google_uid
+                            .eq(&friend_google_user_id)),
+                )
+                .limit(1)
+                .load::<UserFriend>(connection)
+                .expect("Error loading user friend");
+
+            if(does_friend_exist.len() == 0) {
+                let new_friend = NewUserFriend {
+                    user_google_uid: google_user_id,
+                    friend_google_uid: friend_google_user_id,
+                    is_friend_excluded: false,
+                    created_at: now,
+                };
+
+                let new_social_id_db_record = diesel::insert_into(userfriends)
+                    .values(&new_friend)
+                    .execute(connection)
+                    .expect("Error saving new friend");
+            }
+            //--
+            let does_reverse_friend_exist = userfriends
+                .filter(
+                    tubepeek_server_rust::schema::userfriends::dsl::user_google_uid
+                        .eq(&friend_google_user_id)
+                        .and(tubepeek_server_rust::schema::userfriends::dsl::friend_google_uid
+                            .eq(&google_user_id)),
+                )
+                .limit(1)
+                .load::<UserFriend>(connection)
+                .expect("Error loading user reverse friend");
+
+            if(does_reverse_friend_exist.len() == 0) {
+                let reverse_new_friend = NewUserFriend {
+                    user_google_uid: friend_google_user_id,
+                    friend_google_uid: google_user_id,
+                    is_friend_excluded: false,
+                    created_at: now,
+                };
+
+                diesel::insert_into(userfriends)
+                    .values(&reverse_new_friend)
+                    .execute(connection)
+                    .expect("Error saving new reverse friend");
+            }
+            //--
+            let current_user_social_identity = social_identities
+                .filter(
+                    tubepeek_server_rust::schema::social_identities::dsl::uid
+                        .eq(google_user_id),
+                )
+                .load::<SocialIdentity>(connection)
+                .expect("Error loading user social identity");
+
+            let friend_social_identity = social_identities
+                .filter(
+                    tubepeek_server_rust::schema::social_identities::dsl::uid
+                        .eq(friend_google_user_id),
+                )
+                .load::<SocialIdentity>(connection)
+                .expect("Error loading user social identity");
+
+            if (current_user_social_identity.len() > 0 || friend_social_identity.len() > 0) {
+                let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
+
+                for (conn_id, meta) in connected_clients.iter() {
+                    if(current_user_social_identity.len() > 0 && meta.googleUserId == *friend_google_user_id) {
+                        let broadcast_data = json!({
+                            "action": "NewFriendInstalledTubePeek",
+                            "friendDetails": {
+                                "googleUserId": *google_user_id,
+                                "fullName": current_user_social_identity[0].full_name,
+                                "imageUrl": current_user_social_identity[0].image_url
+                            }
+                        });
+
+                        meta.socket.send(broadcast_data.to_string());
+                    }
+                    if(friend_social_identity.len() > 0 && meta.googleUserId == *google_user_id) {
+                        let broadcast_data = json!({
+                            "action": "NewFriendInstalledTubePeek",
+                            "friendDetails": {
+                                "googleUserId": *friend_google_user_id,
+                                "fullName": friend_social_identity[0].full_name,
+                                "imageUrl": friend_social_identity[0].image_url
+                            }
+                        });
+
+                        meta.socket.send(broadcast_data.to_string());
+                    }
+                }
+            }
+        },
+        Err(err_msg) => {
+            println!("Invalid make friendship change.");
+        }
+    };
 
     "All good".to_owned()
 }

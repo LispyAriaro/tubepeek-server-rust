@@ -35,3 +35,10 @@ pub struct YoutubeVideoResponse {
     pub title: String,
     pub thumbnail_url: String
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct MakeFriendshipMessage {
+    pub messageType: String,
+    pub googleUserId: String,
+    pub theFriendsGoogleUserId: String
+}
