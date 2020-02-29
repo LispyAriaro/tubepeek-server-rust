@@ -105,7 +105,7 @@ impl Handler for WsServer {
                 handle_social_identity(&raw_message, &database_connection, &self.out)
             }
             "UserChangedOnlineStatus" => {
-                handle_user_online_status_change(&raw_message, &database_connection)
+                handle_user_online_status_change(&raw_message, &database_connection, &self.out)
             }
             "AddThisPersonToMyFriendsList" => {
                 handle_frend_addition(&raw_message, &database_connection)
@@ -247,7 +247,7 @@ fn handle_social_identity(json: &str, connection: &PgConnection, ws_client: &Sen
             });
 
             return dataToReplyWith.to_string();
-        }
+        },
         Err(err_msg) => {
             println!("Invalid take social identity.");
             "bad".to_owned()
@@ -356,8 +356,53 @@ fn persist_user(social_identity: TakeSocialIdentityMessage, connection: &PgConne
 }
 
 
-fn handle_user_online_status_change(json: &str, connection: &PgConnection) -> String {
+fn handle_user_online_status_change(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
     println!("Got UserChangedOnlineStatus message.");
+
+    let online_status_maybe: Result<OnlineStatusChange, Error> =
+        serde_json::from_str(json);
+
+    match online_status_maybe {
+        Ok(online_status) => {
+            let google_user_id = &online_status.googleUserId.to_owned();
+            let online_status = &online_status.onlineState;
+
+            let broadcast_data = json!({
+                "action": "TakeFriendOnlineStatus",
+                "googleUserId": *google_user_id,
+                "onlineState": online_status
+            });
+
+            let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
+
+            let conn_metadata_maybe: Option<&mut WsConnectedClientMetadata> =
+                connected_clients.get_mut(&ws_client.connection_id());
+
+            match conn_metadata_maybe {
+                Some(conn_metadata) => {
+                    for friend in conn_metadata.onlineFriends.iter() {
+                        let friend_conn_maybe: Option<&WsConnectedClientMetadata> =
+                            connected_clients.get(&friend.socketId);
+
+                        match friend_conn_maybe {
+                            Some(conn) => {
+                                conn.socket.send(broadcast_data.to_string());
+                            },
+                            None => println!("Done not")
+                        };
+                    }
+                },
+                _ => println!("Don't panic kkkkkkkk"),
+            };
+
+            if(!online_status) {
+                connected_clients.remove(&ws_client.connection_id());
+            }
+        },
+        Err(err_msg) => {
+            println!("Invalid take online status change.");
+        }
+    };
 
     "All good".to_owned()
 }
@@ -440,7 +485,7 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                                 };
                             }
                         },
-                        _ => println!("Don't panic kkkkkkkk"),
+                        _ => println!("Don't panic!"),
                     };
 
                     println!("connected_clients: {:?}", connected_clients);
@@ -449,7 +494,7 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                     persist_video_watched(google_user_id, video_url, video_title.as_str(), connection);
                 },
                 Err(err_msg) => {
-                    println!("Invalid video change. {:?}", err_msg);
+                    println!("Invalid youtube response. {:?}", err_msg);
                 }
             };
         },
