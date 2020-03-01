@@ -2,7 +2,10 @@
 
 create table usermaster (
   id bigserial primary key not null,
-  email_address text not null unique,
+  uid text not null,
+  provider text not null,
+  full_name text not null,
+  image_url text not null,
   created_at timestamp not null,
   updated_at timestamp
 );
@@ -12,18 +15,6 @@ create table userfriends (
   user_google_uid text not null,
   friend_google_uid text not null,
   is_friend_excluded boolean not null,
-  created_at timestamp not null,
-  updated_at timestamp
-);
-
-create table social_identities (
-  id bigserial primary key not null,
-  user_id BIGINT not null REFERENCES usermaster(id),
-  provider text not null,
-  email_address text not null,
-  full_name text not null,
-  uid text not null,
-  image_url text not null,
   created_at timestamp not null,
   updated_at timestamp
 );

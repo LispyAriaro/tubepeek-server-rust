@@ -1,18 +1,4 @@
 table! {
-    social_identities (id) {
-        id -> Int8,
-        user_id -> Int8,
-        provider -> Text,
-        email_address -> Text,
-        full_name -> Text,
-        uid -> Text,
-        image_url -> Text,
-        created_at -> Timestamp,
-        updated_at -> Nullable<Timestamp>,
-    }
-}
-
-table! {
     userfriends (id) {
         id -> Int8,
         user_google_uid -> Text,
@@ -26,7 +12,10 @@ table! {
 table! {
     usermaster (id) {
         id -> Int8,
-        email_address -> Text,
+        uid -> Text,
+        provider -> Text,
+        full_name -> Text,
+        image_url -> Text,
         created_at -> Timestamp,
         updated_at -> Nullable<Timestamp>,
     }
@@ -53,12 +42,10 @@ table! {
     }
 }
 
-joinable!(social_identities -> usermaster (user_id));
 joinable!(uservideos -> usermaster (user_id));
 joinable!(uservideos -> videos (video_id));
 
 allow_tables_to_appear_in_same_query!(
-    social_identities,
     userfriends,
     usermaster,
     uservideos,

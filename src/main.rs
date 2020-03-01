@@ -28,7 +28,7 @@ use diesel::PgConnection;
 use serde_json::{json, Error, Value as JsonValue};
 
 use chrono::{NaiveDateTime, Utc};
-use tubepeek_server_rust::models::{NewSocialIdentity, NewUser, NewUserFriend, SocialIdentity, Usermaster, Video, NewVideo, UserVideo, NewUserVideo, UserFriend};
+use tubepeek_server_rust::models::{NewUser, NewUserFriend, Usermaster, Video, NewVideo, UserVideo, NewUserVideo, UserFriend};
 
 
 
@@ -101,8 +101,8 @@ impl Handler for WsServer {
         let database_connection = pool.get().expect("Failed to get pooled connection");
 
         let response = match json_maybe.unwrap()["messageType"].as_str().unwrap() {
-            "TakeMySocialIdentity" => {
-                handle_social_identity(&raw_message, &database_connection, &self.out)
+            "TakeUserMessage" => {
+                handle_user(&raw_message, &database_connection, &self.out)
             },
             "UserChangedOnlineStatus" => {
                 handle_user_online_status_change(&raw_message, &database_connection, &self.out)
@@ -156,19 +156,18 @@ impl Handler for WsServer {
     }
 }
 
-fn handle_social_identity(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
-    let social_identity_maybe: Result<TakeSocialIdentityMessage, Error> =
+fn handle_user(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
+    let user_details_maybe: Result<TakeUserMessage, Error> =
         serde_json::from_str(json);
 
-    use tubepeek_server_rust::schema::social_identities::dsl::*;
     use tubepeek_server_rust::schema::userfriends::dsl::*;
     use tubepeek_server_rust::schema::usermaster::dsl::*;
 
-    match social_identity_maybe {
-        Ok(social_identity) => {
-            let google_user_id = &social_identity.authData.googleUserId.to_owned();
+    match user_details_maybe {
+        Ok(user_details) => {
+            let google_user_id = &user_details.authData.googleUserId.to_owned();
 
-            persist_user(social_identity, connection);
+            persist_user(user_details, connection);
             //--
             let existing_friends = userfriends
                 .filter(
@@ -258,85 +257,42 @@ fn handle_social_identity(json: &str, connection: &PgConnection, ws_client: &Sen
 }
 
 
-fn persist_user(social_identity: TakeSocialIdentityMessage, connection: &PgConnection) {
-    use tubepeek_server_rust::schema::social_identities::dsl::*;
+fn persist_user(user_details: TakeUserMessage, connection: &PgConnection) {
     use tubepeek_server_rust::schema::usermaster::dsl::*;
 
     let now = Utc::now().naive_utc();
-    let auth_data_email = social_identity.authData.emailAddress.as_str();
-    let google_user_id = social_identity.authData.googleUserId.as_str();
+    let google_user_id = user_details.authData.googleUserId.as_str();
 
-    let save_social_identity =
-        |user_record_id: i64,
-         auth_data_email: &str,
-         prov: String,
-         auth_data: &AuthData,
-         now: &NaiveDateTime| {
-            let new_social_identity = NewSocialIdentity {
-                user_id: user_record_id,
-                provider: prov,
-                email_address: auth_data_email,
-                full_name: auth_data.fullName.as_str(),
-                uid: auth_data.googleUserId.as_str(),
-                image_url: auth_data.imageUrl.as_str(),
-                created_at: *now,
-            };
-
-            let new_social_id_db_record = diesel::insert_into(social_identities)
-                .values(&new_social_identity)
-                .execute(connection)
-                .expect("Error saving new social identity");
-        };
-
-    let existing_user_results = usermaster
+    let existing_user = usermaster
         .filter(
-            tubepeek_server_rust::schema::usermaster::dsl::email_address
-                .eq(&social_identity.authData.emailAddress),
+            tubepeek_server_rust::schema::usermaster::dsl::uid
+                .eq(google_user_id),
         )
         .limit(1)
         .load::<Usermaster>(connection)
         .expect("Error loading users");
 
-    if existing_user_results.len() > 0 {
-        let existing_social_identity = social_identities
-            .filter(
-                tubepeek_server_rust::schema::social_identities::dsl::user_id
-                    .eq(existing_user_results[0].id)
-                    .and(
-                        tubepeek_server_rust::schema::social_identities::dsl::provider
-                            .eq(&social_identity.provider),
-                    ),
-            )
-            .load::<SocialIdentity>(connection)
-            .expect("Error loading user social identity");
-
-        if (existing_social_identity.len() > 0) {
-            diesel::update(
-                social_identities.filter(
-                    tubepeek_server_rust::schema::social_identities::dsl::id
-                        .eq(existing_social_identity[0].id),
-                ),
-            )
-                .set((
-                    tubepeek_server_rust::schema::social_identities::dsl::full_name
-                        .eq(&social_identity.authData.fullName),
-                    tubepeek_server_rust::schema::social_identities::dsl::image_url
-                        .eq(&social_identity.authData.imageUrl),
-                    tubepeek_server_rust::schema::social_identities::dsl::updated_at.eq(&now),
-                ))
-                .execute(connection);
-        } else {
-            save_social_identity(
-                existing_user_results[0].id,
-                auth_data_email,
-                social_identity.provider,
-                &social_identity.authData,
-                &now,
-            );
-        }
+    if existing_user.len() > 0 {
+        diesel::update(
+            usermaster.filter(
+                tubepeek_server_rust::schema::usermaster::dsl::uid
+                    .eq(google_user_id),
+            ),
+        )
+        .set((
+            tubepeek_server_rust::schema::usermaster::dsl::full_name
+                .eq(&user_details.authData.fullName),
+            tubepeek_server_rust::schema::usermaster::dsl::image_url
+                .eq(&user_details.authData.imageUrl),
+            tubepeek_server_rust::schema::usermaster::dsl::updated_at.eq(&now),
+        ))
+        .execute(connection);
     } else {
         let new_user = NewUser {
-            email_address: auth_data_email,
+            uid: google_user_id,
+            provider: user_details.provider,
+            full_name: user_details.authData.fullName.as_str(),
+            image_url: user_details.authData.imageUrl.as_str(),
             created_at: now,
         };
 
@@ -344,14 +300,6 @@ fn persist_user(social_identity: TakeSocialIdentityMessage, connection: &PgConne
             .values(&new_user)
             .get_result::<Usermaster>(connection)
             .expect("Error saving new user");
-
-        save_social_identity(
-            new_user_db_record.id,
-            auth_data_email,
-            social_identity.provider,
-            &social_identity.authData,
-            &now,
-        );
     }
 }
 
@@ -410,7 +358,6 @@ fn handle_user_online_status_change(json: &str, connection: &PgConnection, ws_cl
 fn handle_friendship(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
     println!("Got MakeFriendship message.");
 
-    use tubepeek_server_rust::schema::social_identities::dsl::*;
     use tubepeek_server_rust::schema::usermaster::dsl::*;
     use tubepeek_server_rust::schema::userfriends::dsl::*;
 
@@ -473,45 +420,45 @@ fn handle_friendship(json: &str, connection: &PgConnection, ws_client: &Sender) 
                     .expect("Error saving new reverse friend");
             }
             //--
-            let current_user_social_identity = social_identities
+            let current_user = usermaster
                 .filter(
-                    tubepeek_server_rust::schema::social_identities::dsl::uid
+                    tubepeek_server_rust::schema::usermaster::dsl::uid
                         .eq(google_user_id),
                 )
-                .load::<SocialIdentity>(connection)
-                .expect("Error loading user social identity");
+                .load::<Usermaster>(connection)
+                .expect("Error loading current user");
 
-            let friend_social_identity = social_identities
+            let friend_user = usermaster
                 .filter(
-                    tubepeek_server_rust::schema::social_identities::dsl::uid
+                    tubepeek_server_rust::schema::usermaster::dsl::uid
                         .eq(friend_google_user_id),
                 )
-                .load::<SocialIdentity>(connection)
-                .expect("Error loading user social identity");
+                .load::<Usermaster>(connection)
+                .expect("Error loading friend user");
 
-            if (current_user_social_identity.len() > 0 || friend_social_identity.len() > 0) {
+            if (current_user.len() > 0 || friend_user.len() > 0) {
                 let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
 
                 for (conn_id, meta) in connected_clients.iter() {
-                    if(current_user_social_identity.len() > 0 && meta.googleUserId == *friend_google_user_id) {
+                    if(current_user.len() > 0 && meta.googleUserId == *friend_google_user_id) {
                         let broadcast_data = json!({
                             "action": "NewFriendInstalledTubePeek",
                             "friendDetails": {
                                 "googleUserId": *google_user_id,
-                                "fullName": current_user_social_identity[0].full_name,
-                                "imageUrl": current_user_social_identity[0].image_url
+                                "fullName": current_user[0].full_name,
+                                "imageUrl": current_user[0].image_url
                             }
                         });
 
                         meta.socket.send(broadcast_data.to_string());
                     }
-                    if(friend_social_identity.len() > 0 && meta.googleUserId == *google_user_id) {
+                    if(friend_user.len() > 0 && meta.googleUserId == *google_user_id) {
                         let broadcast_data = json!({
                             "action": "NewFriendInstalledTubePeek",
                             "friendDetails": {
                                 "googleUserId": *friend_google_user_id,
-                                "fullName": friend_social_identity[0].full_name,
-                                "imageUrl": friend_social_identity[0].image_url
+                                "fullName": friend_user[0].full_name,
+                                "imageUrl": friend_user[0].image_url
                             }
                         });
 
@@ -531,9 +478,6 @@ fn handle_friendship(json: &str, connection: &PgConnection, ws_client: &Sender) 
 fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
     println!("Got ChangedVideo message.");
     let video_change_maybe: Result<VideoChangeMessage, Error> = serde_json::from_str(json);
-
-    use tubepeek_server_rust::schema::social_identities::dsl::*;
-    use tubepeek_server_rust::schema::usermaster::dsl::*;
 
     match video_change_maybe {
         Ok(video_change) => {
@@ -621,7 +565,7 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
 }
 
 fn persist_video_watched(google_user_id: &str, videoUrl: &str, videoTitle: &str, connection: &PgConnection) {
-    use tubepeek_server_rust::schema::social_identities::dsl::*;
+    use tubepeek_server_rust::schema::usermaster::dsl::*;
     use tubepeek_server_rust::schema::videos::dsl::*;
     use tubepeek_server_rust::schema::uservideos::dsl::*;
 
@@ -651,19 +595,15 @@ fn persist_video_watched(google_user_id: &str, videoUrl: &str, videoTitle: &str,
                 .expect("Error saving new user video");
         };
 
-    let existing_social_identity = social_identities
+    let existing_user = usermaster
         .filter(
-            tubepeek_server_rust::schema::social_identities::dsl::uid
-                .eq(google_user_id)
-                .and(
-                    tubepeek_server_rust::schema::social_identities::dsl::provider
-                        .eq("google")
-                ),
+            tubepeek_server_rust::schema::usermaster::dsl::uid
+                .eq(google_user_id),
         )
-        .load::<SocialIdentity>(connection)
-        .expect("Error loading user social identity");
+        .load::<Usermaster>(connection)
+        .expect("Error loading user");
 
-    if (existing_social_identity.len() > 0) {
+    if (existing_user.len() > 0) {
         let existing_video = videos
             .filter(
                 tubepeek_server_rust::schema::videos::dsl::youtube_video_id
@@ -685,12 +625,12 @@ fn persist_video_watched(google_user_id: &str, videoUrl: &str, videoTitle: &str,
                 .get_result::<Video>(connection)
                 .expect("Error saving new video");
 
-            save_user_video(existing_social_identity[0].user_id, new_video_db_record.id, &now);
+            save_user_video(existing_user[0].id, new_video_db_record.id, &now);
         } else {
             let existing_user_video = uservideos
                 .filter(
                     tubepeek_server_rust::schema::uservideos::dsl::user_id
-                        .eq(existing_social_identity[0].user_id)
+                        .eq(existing_user[0].id)
                         .and(tubepeek_server_rust::schema::uservideos::dsl::video_id
                             .eq(existing_video[0].id))
                 )
@@ -698,7 +638,7 @@ fn persist_video_watched(google_user_id: &str, videoUrl: &str, videoTitle: &str,
                 .expect("Error loading user video");
 
             if (existing_user_video.len() == 0) {
-                save_user_video(existing_social_identity[0].user_id, existing_video[0].id, &now);
+                save_user_video(existing_user[0].id, existing_video[0].id, &now);
             }
         }
     }
@@ -707,8 +647,8 @@ fn persist_video_watched(google_user_id: &str, videoUrl: &str, videoTitle: &str,
 fn main() {
     println!("Tubepeek server up and running ...");
 
-    let server_ip = "192.168.88.205:9160";
-    // let server_ip = "127.0.0.1:9160";
+    //let server_ip = "192.168.88.205:9160";
+    let server_ip = "127.0.0.1:9160";
 
     listen(server_ip, |out| WsServer { out: out }).unwrap()
 }
