@@ -7,8 +7,8 @@ extern crate regex;
 
 extern crate tubepeek_server_rust;
 
-mod db_connection;
-use db_connection::{establish_connection, PgPool};
+mod db_pool;
+use db_pool::{establish_connection, PgPool};
 
 mod ws_dto;
 use ws_dto::*;
