@@ -72,16 +72,6 @@ struct WsServer {
     out: Sender,
 }
 
-// USELESS FOR THE MOMENT. COULDN'T FIND A SIMPLE WAY TO GET A STRING REPRESENTATION OF AN ENUM VALUE
-// TO USE IN A MATCH STATEMENT. IT HAS TO BE A STRING BECAUSE WHAT I AM COMPARING TO IS A STRING COMING FROM THE CLIENT SIDE
-// OF THE WEB SOCKET CONNECTION.
-pub enum WsMessageType {
-    TakeMySocialIdentity,
-    UserChangedOnlineStatus,
-    AddThisPersonToMyFriendsList,
-    ChangedVideo,
-}
-
 impl Handler for WsServer {
     fn on_message(&mut self, msg: Message) -> WsResult<()> {
         let raw_message = msg.into_text().unwrap();
@@ -100,7 +90,7 @@ impl Handler for WsServer {
         let pool = POOL.clone();
         let database_connection = pool.get().expect("Failed to get pooled connection");
 
-        let response = match json_maybe.unwrap()["messageType"].as_str().unwrap() {
+        let response = match json_maybe.unwrap()["action"].as_str().unwrap() {
             "TakeUserMessage" => {
                 handle_user(&raw_message, &database_connection, &self.out)
             },

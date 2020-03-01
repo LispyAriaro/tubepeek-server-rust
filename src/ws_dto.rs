@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct TakeUserMessage {
-    pub messageType: String,
+    pub action: String,
     pub provider: String,
     pub authData: AuthData
 }
@@ -17,21 +17,21 @@ pub struct AuthData {
 
 #[derive(Serialize, Deserialize)]
 pub struct OnlineStatusChange {
-    pub messageType: String,
+    pub action: String,
     pub googleUserId: String,
     pub onlineState: bool
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct VideoChangeMessage {
-    pub messageType: String,
+    pub action: String,
     pub googleUserId: String,
     pub videoUrl: String
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct MakeFriendshipMessage {
-    pub messageType: String,
+    pub action: String,
     pub googleUserId: String,
     pub theFriendsGoogleUserId: String
 }
