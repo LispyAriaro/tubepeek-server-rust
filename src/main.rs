@@ -239,11 +239,11 @@ fn handle_user(json: &str, connection: &PgConnection, ws_client: &Sender) -> Str
         },
         Err(err_msg) => {
             println!("Invalid take social identity.");
-            "bad".to_owned()
+            "{}".to_owned()
         }
     };
 
-    "All good".to_owned()
+    "{}".to_owned()
 }
 
 
@@ -342,7 +342,7 @@ fn handle_user_online_status_change(json: &str, connection: &PgConnection, ws_cl
         }
     };
 
-    "All good".to_owned()
+    "{}".to_owned()
 }
 
 fn handle_friendship(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
@@ -432,7 +432,7 @@ fn handle_friendship(json: &str, connection: &PgConnection, ws_client: &Sender) 
                 for (conn_id, meta) in connected_clients.iter() {
                     if(current_user.len() > 0 && meta.googleUserId == *friend_google_user_id) {
                         let broadcast_data = json!({
-                            "action": "NewFriendInstalledTubePeek",
+                            "action": "NewFriendOnTubePeek",
                             "friendDetails": {
                                 "googleUserId": *google_user_id,
                                 "fullName": current_user[0].full_name,
@@ -444,7 +444,7 @@ fn handle_friendship(json: &str, connection: &PgConnection, ws_client: &Sender) 
                     }
                     if(friend_user.len() > 0 && meta.googleUserId == *google_user_id) {
                         let broadcast_data = json!({
-                            "action": "NewFriendInstalledTubePeek",
+                            "action": "NewFriendOnTubePeek",
                             "friendDetails": {
                                 "googleUserId": *friend_google_user_id,
                                 "fullName": friend_user[0].full_name,
@@ -462,7 +462,7 @@ fn handle_friendship(json: &str, connection: &PgConnection, ws_client: &Sender) 
         }
     };
 
-    "All good".to_owned()
+    "{}".to_owned()
 }
 
 fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
@@ -551,7 +551,7 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
             println!("Invalid video change.");
         }
     };
-    "All good".to_owned()
+    "{}".to_owned()
 }
 
 fn persist_video_watched(google_user_id: &str, videoUrl: &str, videoTitle: &str, connection: &PgConnection) {
