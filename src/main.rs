@@ -28,7 +28,7 @@ use diesel::PgConnection;
 use serde_json::{json, Error, Value as JsonValue};
 
 use chrono::{NaiveDateTime, Utc};
-use tubepeek_server_rust::models::{NewUser, NewUserFriend, Usermaster, Video, NewVideo, UserVideo, NewUserVideo, UserFriend};
+use tubepeek_server_rust::models::{NewUser, NewUserFriend, Usermaster, Video, NewVideo, UserVideo, NewUserVideo, UserFriend, UserFriendEntity};
 
 
 
@@ -159,13 +159,13 @@ fn handle_user(json: &str, connection: &PgConnection, ws_client: &Sender) -> Str
 
             persist_user(user_details, connection);
             //--
-            let existing_friends = userfriends
-                .filter(
-                    tubepeek_server_rust::schema::userfriends::dsl::user_google_uid
-                        .eq(google_user_id),
-                )
-                .load::<tubepeek_server_rust::models::UserFriend>(connection)
-                .expect("Error loading userfriends");
+            let existing_friends : Vec<UserFriendEntity> = userfriends
+                .inner_join(usermaster.on(uid.eq(friend_google_uid)))
+                .load::<(tubepeek_server_rust::models::UserFriend, tubepeek_server_rust::models::Usermaster)>(connection)
+                .expect("Error loading userfriends joined to usermaster")
+                .iter()
+                .map(|result| UserFriendEntity::from(&result.0, &result.1))
+                .collect();
 
             let mut connected_clients = WS_CONNECTED_CLIENTS.lock().unwrap();
 
@@ -180,7 +180,7 @@ fn handle_user(json: &str, connection: &PgConnection, ws_client: &Sender) -> Str
             let mut online_friends : Vec<WsOnlineFriend> = vec![];
             let mut friends_current_video : Vec<WsFriendCurrentVideo> = vec![];
 
-            for friend in existing_friends {
+            for friend in &existing_friends {
                 for (conn_id, meta) in connected_clients.iter() {
                     if(meta.googleUserId == friend.friend_google_uid) {
                         online_friends.push(WsOnlineFriend {
@@ -232,7 +232,7 @@ fn handle_user(json: &str, connection: &PgConnection, ws_client: &Sender) -> Str
             let dataToReplyWith = json!({
                 "action": "TakeVideosBeingWatched",
                 "friendsOnYoutubeNow": friends_current_video,
-                "friendsOnTubePeek": []
+                "friendsOnTubePeek": &existing_friends
             });
 
             return dataToReplyWith.to_string();

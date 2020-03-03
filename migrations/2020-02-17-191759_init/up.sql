@@ -2,7 +2,7 @@
 
 create table usermaster (
   id bigserial primary key not null,
-  uid text not null,
+  uid text not null unique,
   provider text not null,
   full_name text not null,
   image_url text not null,
@@ -13,7 +13,7 @@ create table usermaster (
 create table userfriends (
   id bigserial primary key not null,
   user_google_uid text not null,
-  friend_google_uid text not null,
+  friend_google_uid text not null REFERENCES usermaster(uid),
   is_friend_excluded boolean not null,
   created_at timestamp not null,
   updated_at timestamp

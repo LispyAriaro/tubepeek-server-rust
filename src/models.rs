@@ -1,16 +1,20 @@
 use super::schema::{usermaster, userfriends, videos, uservideos};
-
+use serde::{Serialize};
 use chrono::NaiveDateTime;
 
 
-#[derive(Queryable)]
+#[derive(Queryable, Clone, Serialize)]
 pub struct Usermaster {
     pub id: i64,
     pub uid: String,
     pub provider: String,
     pub full_name: String,
     pub image_url: String,
+
+    #[serde(skip_serializing)]
     pub created_at: NaiveDateTime,
+
+    #[serde(skip_serializing)]
     pub updated_at: Option<NaiveDateTime>
 }
 
@@ -23,6 +27,35 @@ pub struct UserFriend {
     pub is_friend_excluded: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: Option<NaiveDateTime>
+}
+
+#[derive(Serialize)]
+pub struct UserFriendEntity {
+    pub id: i64,
+    pub user_google_uid: String,
+    pub friend_google_uid: String,
+    pub friend: Usermaster,
+    pub is_friend_excluded: bool,
+
+    #[serde(skip_serializing)]
+    pub created_at: NaiveDateTime,
+
+    #[serde(skip_serializing)]
+    pub updated_at: Option<NaiveDateTime>
+}
+
+impl UserFriendEntity {
+    pub fn from(user_friend_row: &UserFriend, user: &Usermaster) -> UserFriendEntity {
+        UserFriendEntity {
+            id: user_friend_row.id,
+            user_google_uid: user_friend_row.user_google_uid.to_owned(),
+            friend_google_uid: user_friend_row.friend_google_uid.to_owned(),
+            friend: user.clone(),
+            is_friend_excluded: user_friend_row.is_friend_excluded,
+            created_at: user_friend_row.created_at,
+            updated_at: user_friend_row.updated_at
+        }
+    }
 }
 
 
