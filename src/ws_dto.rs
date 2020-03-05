@@ -10,7 +10,7 @@ pub struct TakeUserMessage {
 
 #[derive(Serialize, Deserialize)]
 pub struct AuthData {
-    pub googleUserId: String,
+    pub uid: String,
     pub fullName: String,
     pub imageUrl: String
 }

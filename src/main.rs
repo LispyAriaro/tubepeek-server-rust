@@ -162,7 +162,7 @@ fn handle_user(json: &str, connection: &PgConnection, ws_client: &Sender) -> Str
 
     match user_details_maybe {
         Ok(user_details) => {
-            let google_user_id = &user_details.authData.googleUserId.to_owned();
+            let google_user_id = &user_details.authData.uid.to_owned();
 
             persist_user(user_details, connection);
             //--
@@ -262,7 +262,7 @@ fn persist_user(user_details: TakeUserMessage, connection: &PgConnection) {
     use tubepeek_server_rust::schema::usermaster::dsl::*;
 
     let now = Utc::now().naive_utc();
-    let google_user_id = user_details.authData.googleUserId.as_str();
+    let google_user_id = user_details.authData.uid.as_str();
 
     let existing_user = usermaster
         .filter(
@@ -648,8 +648,8 @@ fn persist_video_watched(google_user_id: &str, videoUrl: &str, videoTitle: &str,
 fn main() {
     println!("Tubepeek server up and running ...");
 
-    //let server_ip = "192.168.88.205:9160";
-    let server_ip = "127.0.0.1:9160";
+    let server_ip = "192.168.88.205:9160";
+//    let server_ip = "127.0.0.1:9160";
 
     listen(server_ip, |out| WsServer { out: out }).unwrap()
 }
