@@ -56,6 +56,12 @@ pub struct WsConnectedClientCurrentVideo {
     pub thumbnail_url: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CurrentVideoFriend {
+    pub full_name: String,
+    pub image_url: String,
+}
+
 #[derive(Debug)]
 pub struct WsOnlineFriend {
     pub socketId: u32,
@@ -66,6 +72,7 @@ pub struct WsOnlineFriend {
 pub struct WsFriendCurrentVideo {
     pub googleUserId: String,
     pub videoData: WsConnectedClientCurrentVideo,
+    pub friendData: CurrentVideoFriend
 }
 
 struct WsServer {
@@ -196,6 +203,10 @@ fn handle_user(json: &str, connection: &PgConnection, ws_client: &Sender) -> Str
                                         videoUrl: videoDetails.videoUrl.to_string(),
                                         title: videoDetails.title.to_string(),
                                         thumbnail_url: videoDetails.thumbnail_url.to_string()
+                                    },
+                                    friendData: CurrentVideoFriend {
+                                        full_name: friend.friend.full_name.to_owned(),
+                                        image_url: friend.friend.image_url.to_owned()
                                     }
                                 });
                             },
