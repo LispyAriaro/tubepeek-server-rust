@@ -31,8 +31,12 @@ pub struct UserFriend {
 
 #[derive(Serialize)]
 pub struct UserFriendEntity {
+    #[serde(skip_serializing)]
     pub id: i64,
+
+    #[serde(skip_serializing)]
     pub user_google_uid: String,
+
     pub friend_google_uid: String,
     pub friend: Usermaster,
     pub is_friend_excluded: bool,

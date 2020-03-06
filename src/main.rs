@@ -147,7 +147,7 @@ impl Handler for WsServer {
         };
         match code {
             CloseCode::Normal => println!("The client is done with the connection."),
-            CloseCode::Away => println!("The client is leaving the site."),
+            CloseCode::Away => println!("The client is leaving ..."),
             _ => println!("The client encountered an error: {}", reason),
         }
     }
@@ -168,6 +168,10 @@ fn handle_user(json: &str, connection: &PgConnection, ws_client: &Sender) -> Str
             //--
             let existing_friends : Vec<UserFriendEntity> = userfriends
                 .inner_join(usermaster.on(uid.eq(friend_google_uid)))
+                .filter(
+                    tubepeek_server_rust::schema::userfriends::dsl::user_google_uid
+                        .eq(google_user_id)
+                )
                 .load::<(tubepeek_server_rust::models::UserFriend, tubepeek_server_rust::models::Usermaster)>(connection)
                 .expect("Error loading userfriends joined to usermaster")
                 .iter()
