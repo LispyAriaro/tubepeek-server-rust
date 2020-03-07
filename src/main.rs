@@ -484,6 +484,8 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
     println!("Got ChangedVideo message.");
     let video_change_maybe: Result<VideoChangeMessage, Error> = serde_json::from_str(json);
 
+    use tubepeek_server_rust::schema::usermaster::dsl::*;
+
     match video_change_maybe {
         Ok(video_change) => {
             let video_url = video_change.videoUrl.as_str();
@@ -527,26 +529,41 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
 
                     match conn_metadata_maybe {
                         Some(conn_metadata) => {
-                            let broadcast_data = json!({
-                                "action": "TakeFriendVideoChange",
-                                "googleUserId": google_user_id,
-                                "videoData": {
-                                    "videoUrl": video_url,
-                                    "title": video_title,
-                                    "thumbnail_url": video_thumbnail
-                                }
-                            });
+                            let friend_user = usermaster
+                                .filter(
+                                    tubepeek_server_rust::schema::usermaster::dsl::uid
+                                        .eq(google_user_id),
+                                )
+                                .limit(1)
+                                .load::<Usermaster>(connection)
+                                .expect("Error loading friend_user");
 
-                            for friend in conn_metadata.onlineFriends.iter() {
-                                let friend_conn_maybe: Option<&WsConnectedClientMetadata> =
-                                    connected_clients.get(&friend.socketId);
-
-                                match friend_conn_maybe {
-                                    Some(conn) => {
-                                        conn.socket.send(broadcast_data.to_string());
+                            if friend_user.len() > 0 {
+                                let broadcast_data = json!({
+                                    "action": "TakeFriendVideoChange",
+                                    "googleUserId": google_user_id,
+                                    "videoData": {
+                                        "videoUrl": video_url,
+                                        "title": video_title,
+                                        "thumbnail_url": video_thumbnail
                                     },
-                                    None => println!("Done not")
-                                };
+                                    "friendData": {
+                                        "full_name": friend_user[0].full_name,
+                                        "image_url": friend_user[0].image_url
+                                    }
+                                });
+
+                                for friend in conn_metadata.onlineFriends.iter() {
+                                    let friend_conn_maybe: Option<&WsConnectedClientMetadata> =
+                                        connected_clients.get(&friend.socketId);
+
+                                    match friend_conn_maybe {
+                                        Some(conn) => {
+                                            conn.socket.send(broadcast_data.to_string());
+                                        },
+                                        None => println!("Done not")
+                                    };
+                                }
                             }
                         },
                         _ => println!("Don't panic!"),
