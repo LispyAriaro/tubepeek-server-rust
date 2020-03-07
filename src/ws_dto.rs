@@ -33,7 +33,7 @@ pub struct VideoChangeMessage {
 pub struct MakeFriendshipMessage {
     pub action: String,
     pub googleUserId: String,
-    pub theFriendsGoogleUserId: String
+    pub friendGoogleUserId: String
 }
 
 #[derive(Debug, Deserialize)]

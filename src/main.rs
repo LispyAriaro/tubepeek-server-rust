@@ -372,7 +372,7 @@ fn handle_friendship(json: &str, connection: &PgConnection, ws_client: &Sender) 
     match make_friendship_maybe {
         Ok(make_friendship) => {
             let google_user_id = &make_friendship.googleUserId.to_owned();
-            let friend_google_user_id = &make_friendship.googleUserId.to_owned();
+            let friend_google_user_id = &make_friendship.friendGoogleUserId.to_owned();
             let now = Utc::now().naive_utc();
 
             let does_friend_exist = userfriends
