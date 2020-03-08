@@ -13,7 +13,7 @@ fn init_pool(database_url: &str) -> Result<PgPool, PoolError> {
 }
 
 pub fn establish_connection() -> PgPool {
-    dotenv().ok();
+    // dotenv().ok();
 
     let database_url = env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set");
