@@ -54,6 +54,7 @@ pub struct WsConnectedClientCurrentVideo {
     pub videoUrl: String,
     pub title: String,
     pub thumbnail_url: String,
+    pub timeStampInMilliseconds: i64
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -206,7 +207,8 @@ fn handle_user(json: &str, connection: &PgConnection, ws_client: &Sender) -> Str
                                     videoData: WsConnectedClientCurrentVideo {
                                         videoUrl: videoDetails.videoUrl.to_string(),
                                         title: videoDetails.title.to_string(),
-                                        thumbnail_url: videoDetails.thumbnail_url.to_string()
+                                        thumbnail_url: videoDetails.thumbnail_url.to_string(),
+                                        timeStampInMilliseconds: videoDetails.timeStampInMilliseconds
                                     },
                                     friendData: CurrentVideoFriend {
                                         full_name: friend.friend.full_name.to_owned(),
@@ -493,6 +495,7 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
             let youtube_query_url = format!(
                 "http://www.youtube.com{}{}", "/oembed?format=json&url=", video_url
             );
+            let now = Utc::now().naive_utc();
 
             let youtube_response_maybe = reqwest::blocking::get(youtube_query_url.as_str());
             match youtube_response_maybe {
@@ -516,6 +519,7 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                                     videoUrl: video_url.to_string(),
                                     title: video_title.to_string(),
                                     thumbnail_url: video_thumbnail.to_string(),
+                                    timeStampInMilliseconds: now.timestamp_millis()
                                 });
                             },
                             _ => println!("Don't panic kkkkkkkk"),
@@ -545,7 +549,8 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                                     "videoData": {
                                         "videoUrl": video_url,
                                         "title": video_title,
-                                        "thumbnail_url": video_thumbnail
+                                        "thumbnail_url": video_thumbnail,
+                                        "timeStampInMilliseconds": now.timestamp_millis()
                                     },
                                     "friendData": {
                                         "full_name": friend_user[0].full_name,
