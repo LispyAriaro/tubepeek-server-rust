@@ -10,6 +10,9 @@ extern crate tubepeek_server_rust;
 mod db_pool;
 use db_pool::{establish_connection, PgPool};
 
+use dotenv::dotenv;
+use std::env;
+
 mod ws_dto;
 use ws_dto::*;
 
@@ -673,9 +676,10 @@ fn persist_video_watched(google_user_id: &str, videoUrl: &str, videoTitle: &str,
 
 fn main() {
     println!("Tubepeek server up and running ...");
+    // dotenv().ok();
 
-    let server_ip = "192.168.88.205:9160";
-//    let server_ip = "127.0.0.1:9160";
+    let server_ip = env::var("SELF_WEBSOCKET_SERVER_HOST")
+        .expect("SELF_WEBSOCKET_SERVER_HOST must be set");
 
     listen(server_ip, |out| WsServer { out: out }).unwrap()
 }
