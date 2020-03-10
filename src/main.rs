@@ -106,7 +106,7 @@ impl Handler for WsServer {
             "MakeFriendship" => handle_friendship(&raw_message, &database_connection, &self.out),
             "ChangedVideo" => handle_vidoe_change(&raw_message, &database_connection, &self.out),
             "FriendExclusion" => handle_friend_exclusion(&raw_message, &database_connection, &self.out),
-            "PING" => "PONG".to_owned(),
+            "PING" => json!({"action": "PONG"}).to_string().to_owned(),
             _ => "Unknown message type".to_owned(),
         };
         self.out.send(response)
