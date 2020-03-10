@@ -30,6 +30,14 @@ pub struct VideoChangeMessage {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct FriendExclusionMessage {
+    pub action: String,
+    pub googleUserId: String,
+    pub friendGoogleUserId: String,
+    pub exclude: bool
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct MakeFriendshipMessage {
     pub action: String,
     pub googleUserId: String,

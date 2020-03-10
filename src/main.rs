@@ -34,7 +34,6 @@ use chrono::{NaiveDateTime, Utc};
 use tubepeek_server_rust::models::{NewUser, NewUserFriend, Usermaster, Video, NewVideo, UserVideo, NewUserVideo, UserFriend, UserFriendEntity};
 
 
-
 // Using lazy static to have a global reference to my connection pool
 // However, I feel that for testing/mocking this won't be great.
 lazy_static! {
@@ -102,16 +101,12 @@ impl Handler for WsServer {
         let database_connection = pool.get().expect("Failed to get pooled connection");
 
         let response = match json_maybe.unwrap()["action"].as_str().unwrap() {
-            "TakeUserMessage" => {
-                handle_user(&raw_message, &database_connection, &self.out)
-            },
-            "UserChangedOnlineStatus" => {
-                handle_user_online_status_change(&raw_message, &database_connection, &self.out)
-            },
-            "MakeFriendship" => {
-                handle_friendship(&raw_message, &database_connection, &self.out)
-            },
+            "TakeUserMessage" => handle_user(&raw_message, &database_connection, &self.out),
+            "UserChangedOnlineStatus" => handle_online_status_change(&raw_message, &database_connection, &self.out),
+            "MakeFriendship" => handle_friendship(&raw_message, &database_connection, &self.out),
             "ChangedVideo" => handle_vidoe_change(&raw_message, &database_connection, &self.out),
+            "FriendExclusion" => handle_friend_exclusion(&raw_message, &database_connection, &self.out),
+
             _ => "Unknown message type".to_owned(),
         };
         self.out.send(response)
@@ -314,7 +309,7 @@ fn persist_user(user_details: TakeUserMessage, connection: &PgConnection) {
 }
 
 
-fn handle_user_online_status_change(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
+fn handle_online_status_change(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
     println!("Got UserChangedOnlineStatus message.");
 
     let online_status_maybe: Result<OnlineStatusChange, Error> =
@@ -490,6 +485,7 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
     let video_change_maybe: Result<VideoChangeMessage, Error> = serde_json::from_str(json);
 
     use tubepeek_server_rust::schema::usermaster::dsl::*;
+    use reqwest::Error as ReqWestError;
 
     match video_change_maybe {
         Ok(video_change) => {
@@ -582,8 +578,8 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
 
                     persist_video_watched(google_user_id, video_url, video_title.as_str(), connection);
                 },
-                Err(err_msg) => {
-                    println!("Invalid youtube response. {:?}", err_msg);
+                _ => {
+                    println!("Invalid youtube response.");
                 }
             };
         },
@@ -672,6 +668,36 @@ fn persist_video_watched(google_user_id: &str, videoUrl: &str, videoTitle: &str,
             }
         }
     }
+}
+
+
+fn handle_friend_exclusion(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
+    let friend_exclusion_maybe: Result<FriendExclusionMessage, Error> = serde_json::from_str(json);
+
+    use tubepeek_server_rust::schema::userfriends::dsl::*;
+
+    match friend_exclusion_maybe {
+        Ok(friend_exclusion) => {
+            diesel::update(
+                userfriends.filter(
+                    tubepeek_server_rust::schema::userfriends::dsl::user_google_uid
+                        .eq(friend_exclusion.googleUserId)
+                        .and(tubepeek_server_rust::schema::userfriends::dsl::friend_google_uid
+                            .eq(friend_exclusion.friendGoogleUserId)),
+                ),
+            )
+            .set((
+                tubepeek_server_rust::schema::userfriends::dsl::is_friend_excluded
+                    .eq(friend_exclusion.exclude)
+            ))
+            .execute(connection);
+        },
+        Err(err_msg) => {
+            println!("Invalid friend exclusion.");
+        }
+    }
+
+    "{}".to_owned()
 }
 
 fn main() {
