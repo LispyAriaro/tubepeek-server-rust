@@ -33,6 +33,8 @@ use serde_json::{json, Error, Value as JsonValue};
 use chrono::{NaiveDateTime, Utc};
 use tubepeek_server_rust::models::{NewUser, NewUserFriend, Usermaster, Video, NewVideo, UserVideo, NewUserVideo, UserFriend, UserFriendEntity};
 
+use warp::Filter; // 1.
+
 
 // Using lazy static to have a global reference to my connection pool
 // However, I feel that for testing/mocking this won't be great.
@@ -700,7 +702,9 @@ fn handle_friend_exclusion(json: &str, connection: &PgConnection, ws_client: &Se
     "{}".to_owned()
 }
 
-fn main() {
+
+#[tokio::main] // 2.
+async fn main() {
     println!("Tubepeek server up and running ...");
     // dotenv().ok();
 
@@ -711,4 +715,11 @@ fn main() {
         // Inform the user of failure
         println!("Failed to create WebSocket due to {:?}", error);
     };
+
+    let hello = warp::path!("hello" / String) // 3.
+        .map(|name| format!("Hello, {}!", name)); // 4.
+
+    warp::serve(hello) // 5.
+        .run(([0, 0, 0, 0], 9160)) // 6.
+        .await;
 }
