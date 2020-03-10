@@ -707,5 +707,8 @@ fn main() {
     let server_ip = env::var("SELF_WEBSOCKET_SERVER_HOST")
         .expect("SELF_WEBSOCKET_SERVER_HOST must be set");
 
-    listen(server_ip, |out| WsServer { out: out }).unwrap()
+    if let Err(error) = listen(server_ip, |out| WsServer { out: out }) {
+        // Inform the user of failure
+        println!("Failed to create WebSocket due to {:?}", error);
+    };
 }
