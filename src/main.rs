@@ -708,18 +708,23 @@ async fn main() {
     println!("Tubepeek server up and running ...");
     // dotenv().ok();
 
-    let server_ip = env::var("SELF_WEBSOCKET_SERVER_HOST")
-        .expect("SELF_WEBSOCKET_SERVER_HOST must be set");
+    let server_ip = env::var("SELF_SERVER_HOST")
+        .expect("SELF_SERVER_HOST must be set");
 
-    if let Err(error) = listen(server_ip, |out| WsServer { out: out }) {
+    let server_port = env::var("PORT")
+        .expect("PORT must be set");
+
+    let ws_mount_point = format!("{}:{}", server_ip, server_port);
+
+    if let Err(error) = listen(ws_mount_point, |out| WsServer { out: out }) {
         // Inform the user of failure
         println!("Failed to create WebSocket due to {:?}", error);
     };
 
-    let hello = warp::path!("hello" / String) // 3.
-        .map(|name| format!("Hello, {}!", name)); // 4.
-
-    warp::serve(hello) // 5.
-        .run(([0, 0, 0, 0], 9160)) // 6.
-        .await;
+//    let hello = warp::path!("hello" / String) // 3.
+//        .map(|name| format!("Hello, {}!", name)); // 4.
+//
+//    warp::serve(hello) // 5.
+//        .run(([0, 0, 0, 0], 9160)) // 6.
+//        .await;
 }
