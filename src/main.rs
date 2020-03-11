@@ -496,11 +496,18 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
             );
             let now = Utc::now().naive_utc();
 
-            let youtube_response_maybe = reqwest::blocking::get(youtube_query_url.as_str());
-            match youtube_response_maybe {
-                Ok(valid_response) => {
-                    let decoded_video_details =
-                        valid_response.json::<YoutubeVideoResponse>().unwrap();
+            let response_maybe = reqwest::blocking::get(youtube_query_url.as_str());
+            match response_maybe {
+                Ok(response) => {
+                    let youtube_response_maybe = response.json::<YoutubeVideoResponse>();
+                    if let Err(_err) = youtube_response_maybe {
+                        return json!({
+                            "action": "ERROR",
+                            "message": "Invalid youtube json response format"
+                        }).to_string();
+                    }
+
+                    let decoded_video_details = youtube_response_maybe.unwrap();
                     let video_title = decoded_video_details.title;
                     let video_thumbnail = decoded_video_details.thumbnail_url;
 
