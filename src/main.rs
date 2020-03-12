@@ -580,9 +580,6 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                         _ => println!("Don't panic!"),
                     };
 
-                    println!("connected_clients: {:?}", connected_clients);
-                    println!("Got to this point ...");
-
                     persist_video_watched(google_user_id, video_url, video_title.as_str(), connection);
                 },
                 _ => {
