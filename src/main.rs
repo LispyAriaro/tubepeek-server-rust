@@ -1,11 +1,5 @@
-extern crate ws;
-
 #[macro_use]
 extern crate lazy_static;
-extern crate reqwest;
-extern crate regex;
-
-extern crate tubepeek_server_rust;
 
 mod db_pool;
 use db_pool::{establish_connection, PgPool};
@@ -19,7 +13,7 @@ use ws_dto::*;
 mod utils;
 use utils::*;
 
-use ws::Result as WsResult;
+use ws::{Result as WsResult};
 use ws::{listen, CloseCode, Handler, Message, Sender};
 use serde::{Deserialize, Serialize};
 
@@ -98,14 +92,14 @@ impl Handler for WsServer {
         }
 
         let pool = POOL.clone();
-        let database_connection = pool.get().expect("Failed to get pooled connection");
+        let db_conn = pool.get().expect("Failed to get pooled connection");
 
         let response = match json_maybe.unwrap()["action"].as_str().unwrap() {
-            "TakeUserMessage" => handle_user(&raw_message, &database_connection, &self.out),
-            "UserChangedOnlineStatus" => handle_online_status_change(&raw_message, &database_connection, &self.out),
-            "MakeFriendship" => handle_friendship(&raw_message, &database_connection, &self.out),
-            "ChangedVideo" => handle_vidoe_change(&raw_message, &database_connection, &self.out),
-            "FriendExclusion" => handle_friend_exclusion(&raw_message, &database_connection, &self.out),
+            "TakeUserMessage" => handle_user(&raw_message, &db_conn, &self.out),
+            "UserChangedOnlineStatus" => handle_online_status_change(&raw_message, &db_conn, &self.out),
+            "MakeFriendship" => handle_friendship(&raw_message, &db_conn, &self.out),
+            "ChangedVideo" => handle_vidoe_change(&raw_message, &db_conn, &self.out),
+            "FriendExclusion" => handle_friend_exclusion(&raw_message, &db_conn, &self.out),
             "PING" => json!({"action": "PONG"}).to_string().to_owned(),
             _ => "Unknown message type".to_owned(),
         };
@@ -181,7 +175,7 @@ fn handle_user(json: &str, connection: &PgConnection, ws_client: &Sender) -> Str
 
             let mut is_connected_already = false;
             for (conn_id, meta) in connected_clients.iter() {
-                if(meta.googleUserId == *google_user_id) {
+                if(meta.googleUserId == google_user_id.to_owned()) {
                     is_connected_already = true;
                     break;
                 }
@@ -310,8 +304,6 @@ fn persist_user(user_details: TakeUserMessage, connection: &PgConnection) {
 
 
 fn handle_online_status_change(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
-    println!("Got UserChangedOnlineStatus message.");
-
     let online_status_maybe: Result<OnlineStatusChange, Error> =
         serde_json::from_str(json);
 
@@ -361,8 +353,6 @@ fn handle_online_status_change(json: &str, connection: &PgConnection, ws_client:
 }
 
 fn handle_friendship(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
-    println!("Got MakeFriendship message.");
-
     use tubepeek_server_rust::schema::usermaster::dsl::*;
     use tubepeek_server_rust::schema::userfriends::dsl::*;
 
@@ -481,7 +471,6 @@ fn handle_friendship(json: &str, connection: &PgConnection, ws_client: &Sender) 
 }
 
 fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender) -> String {
-    println!("Got ChangedVideo message.");
     let video_change_maybe: Result<VideoChangeMessage, Error> = serde_json::from_str(json);
 
     use tubepeek_server_rust::schema::usermaster::dsl::*;
@@ -491,9 +480,24 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
         Ok(video_change) => {
             let video_url = video_change.videoUrl.as_str();
             let google_user_id = video_change.googleUserId.as_str();
+            let youtube_api_key = env::var("YOUTUBE_API_KEY").unwrap();
+
+            let youtube_video_id_maybe: Option<String> = get_youtube_videoid(video_url);
+            if let None = youtube_video_id_maybe {
+                return json!({
+                    "action": "ERROR",
+                    "message": "Invalid youtube id"
+                }).to_string();
+            }
+            let youtubeVideoId = youtube_video_id_maybe.unwrap();
+
+//            let youtube_query_url = format!(
+//                "http://www.youtube.com{}{}", "/oembed?format=json&url=", video_url
+//            );
             let youtube_query_url = format!(
-                "http://www.youtube.com{}{}", "/oembed?format=json&url=", video_url
+                "https://www.googleapis.com/youtube/v3/videos?id={}&key={}&part=snippet", youtubeVideoId, youtube_api_key
             );
+
             let now = Utc::now().naive_utc();
 
             let response_maybe = reqwest::blocking::get(youtube_query_url.as_str());
@@ -508,8 +512,10 @@ fn handle_vidoe_change(json: &str, connection: &PgConnection, ws_client: &Sender
                     }
 
                     let decoded_video_details = youtube_response_maybe.unwrap();
-                    let video_title = decoded_video_details.title;
-                    let video_thumbnail = decoded_video_details.thumbnail_url;
+//                    let video_title = decoded_video_details.title;
+//                    let video_thumbnail = decoded_video_details.thumbnail_url;
+                    let video_title = &decoded_video_details.items.get(0).unwrap().snippet.title;
+                    let video_thumbnail = &decoded_video_details.items.get(0).unwrap().snippet.thumbnails.default.url;
 
                     let client_conn_id = ws_client.connection_id();
 
@@ -609,21 +615,18 @@ fn persist_video_watched(google_user_id: &str, videoUrl: &str, videoTitle: &str,
 
     let youtubeVideoId = youtube_video_id_maybe.unwrap();
 
-    let save_user_video =
-        |userId: i64,
-         videoId: i64,
-         now: &NaiveDateTime| {
-            let new_user_video = NewUserVideo {
-                user_id: userId,
-                video_id: videoId,
-                created_at: *now,
-            };
-
-            diesel::insert_into(uservideos)
-                .values(&new_user_video)
-                .execute(connection)
-                .expect("Error saving new user video");
+    let save_user_video = |userId: i64, videoId: i64, now: &NaiveDateTime| {
+        let new_user_video = NewUserVideo {
+            user_id: userId,
+            video_id: videoId,
+            created_at: *now,
         };
+
+        diesel::insert_into(uservideos)
+            .values(&new_user_video)
+            .execute(connection)
+            .expect("Error saving new user video");
+    };
 
     let existing_user = usermaster
         .filter(
@@ -714,6 +717,10 @@ fn main() {
 
     let server_port = env::var("PORT")
         .expect("PORT must be set");
+
+    env::var("YOUTUBE_API_KEY")
+        .expect("YOUTUBE_API_KEY must be set");
+
 
     let ws_mount_point = format!("{}:{}", server_ip, server_port);
 

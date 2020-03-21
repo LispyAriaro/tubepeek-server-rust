@@ -44,8 +44,29 @@ pub struct MakeFriendshipMessage {
     pub friendGoogleUserId: String
 }
 
+
+#[derive(Debug, Deserialize)]
+pub struct YoutubeVideoResponseItemSnippetThumbnailDetail {
+    pub url: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct YoutubeVideoResponseItemSnippetThumbnail {
+    pub default: YoutubeVideoResponseItemSnippetThumbnailDetail,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct YoutubeVideoResponseItemSnippet {
+    pub title: String,
+    pub thumbnails: YoutubeVideoResponseItemSnippetThumbnail
+}
+
+#[derive(Debug, Deserialize)]
+pub struct YoutubeVideoResponseItem {
+    pub snippet: YoutubeVideoResponseItemSnippet,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct YoutubeVideoResponse {
-    pub title: String,
-    pub thumbnail_url: String
+    pub items: Vec<YoutubeVideoResponseItem>
 }
